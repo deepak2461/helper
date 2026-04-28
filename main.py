@@ -1,21 +1,25 @@
 from audio.mic_stream import start_mic_stream
 from logger import logger
-#import asyncio
-#from audio.mic_stream import async_audio_stream
-from stt.deepgram_client import DeepgramClient
 from stt.deepgram_client import DeepgramSTT
+from utils.context_loader import load_context
+from llm.answer_engine import AnswerEngine
 from dotenv import load_dotenv
 
-
 def main():
-    logger.info("Starting STT test with Deepgram SDK...")
     load_dotenv()
+    logger.info("Starting Helper...")
 
-    logger.info("Loading Deepgram API key...")
+    # Load resume + JD
+    context = load_context(resume_path="docs/resume.pdf", jd_path="docs/jd.pdf")
 
-    stt = DeepgramSTT()
+    # Init LLM engine
+    engine = AnswerEngine(resume=context["resume"], jd=context["jd"])
+
+    # Init STT
+    stt = DeepgramSTT(answer_engine=engine)
+
+    # Start mic + run
     audio_stream = start_mic_stream()
-
     stt.run(audio_stream)
 
 
