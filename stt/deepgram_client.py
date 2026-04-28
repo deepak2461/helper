@@ -25,21 +25,28 @@ class DeepgramSTT:
             try:
                 transcript = result.channel.alternatives[0].transcript
                 is_final = result.is_final
+
                 if transcript.strip():
-                    if is_final:
+                    if not is_final:
+                        #logger.info(f"[FINAL] {transcript}")
+                        # Show live on same line — feels like real-time captions
+                        print(f"\r🎤 {transcript}    ", end="", flush=True)
+                    else:
+                        # Clear the live line print final
+                        print(f"\r✅ {transcript}        ")
                         logger.info(f"[FINAL] {transcript}")
+
 
                         question = process_transcript(transcript)
                         if question:
-                            logger.info(f"[Question] {question}")
+                            logger.info(f"[QUESTION] {question}")
                             if self.answer_engine:
                                 answer = self.answer_engine.generate(question)
                                 if answer :
-                                    logger.info(f"[Answer]\n {answer}")
+                                    logger.info(f"[ANSWER]\n {answer}")
                             else:
                                 logger.warning("No answer engine provided")
-                    else:
-                        logger.debug(f"[PARTIAL] {transcript}")
+                    
             except Exception as e:
                 logger.error(f"Error processing transcript: {e}")
 
