@@ -9,6 +9,13 @@ def main():
     load_dotenv()
     logger.info("Starting Helper...")
 
+    ## Added below 5 lines while trying to capture system audio, but it is not working yet. Will debug later. [  29/04/26 - 12:20 AM ]
+    # print("\nAudio mode:")
+    # print("  [1] Microphone (default) — captures your voice + nearby sounds")
+    # print("  [2] System audio loopback — captures YouTube, Meet, Zoom etc.")
+    # choice = input("\nChoose mode (1 or 2): ").strip()
+    # loopback = choice == "2"
+
     # Load resume + JD
     context = load_context(resume_path="docs/resume.pdf", jd_path="docs/jd.pdf")
 

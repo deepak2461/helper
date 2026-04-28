@@ -1,4 +1,4 @@
-from httpx import stream
+
 from openai import OpenAI
 import os
 from logger import logger
@@ -64,7 +64,7 @@ class AnswerEngine:
             #         full_answer += delta
 
             ## Use this for Groq streaming
-            for chunk in stream:
+            for chunk in response:
                 # Groq sometimes returns chunks with no choices
                 if not chunk.choices:
                     continue
