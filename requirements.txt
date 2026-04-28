@@ -1,0 +1,7 @@
+id="reqfile"
+sounddevice
+numpy
+deepgram-sdk
+python-dotenv
+fastapi
+uvicorn

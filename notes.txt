@@ -1,0 +1,3 @@
+
+
+D:\Anthony Deepak\pro\helper\stt\deepgram_client.py -- API key is available change it to env variables

@@ -1,0 +1,25 @@
+[2026-04-27 19:08:42,204] [INFO] [logger] Logging initialized. Log file: logs\run_20260427_190842.log
+[2026-04-27 19:08:42,205] [INFO] [main] Testing microphone stream...
+[2026-04-27 19:08:42,205] [INFO] [mic_stream] Starting microphone stream...
+[2026-04-27 19:08:42,498] [INFO] [mic_stream] Microphone stream started
+[2026-04-27 19:08:42,640] [INFO] [main] Received audio chunk #0, size=3200 bytes
+[2026-04-27 19:08:42,731] [INFO] [main] Received audio chunk #1, size=3200 bytes
+[2026-04-27 19:08:42,840] [INFO] [main] Received audio chunk #2, size=3200 bytes
+[2026-04-27 19:08:42,934] [INFO] [main] Received audio chunk #3, size=3200 bytes
+[2026-04-27 19:08:43,043] [INFO] [main] Received audio chunk #4, size=3200 bytes
+[2026-04-27 19:08:43,135] [INFO] [main] Received audio chunk #5, size=3200 bytes
+[2026-04-27 19:08:43,245] [INFO] [main] Received audio chunk #6, size=3200 bytes
+[2026-04-27 19:08:43,323] [INFO] [main] Received audio chunk #7, size=3200 bytes
+[2026-04-27 19:08:43,448] [INFO] [main] Received audio chunk #8, size=3200 bytes
+[2026-04-27 19:08:43,542] [INFO] [main] Received audio chunk #9, size=3200 bytes
+[2026-04-27 19:08:43,620] [INFO] [main] Received audio chunk #10, size=3200 bytes
+[2026-04-27 19:08:43,730] [INFO] [main] Received audio chunk #11, size=3200 bytes
+[2026-04-27 19:08:43,839] [INFO] [main] Received audio chunk #12, size=3200 bytes
+[2026-04-27 19:08:43,947] [INFO] [main] Received audio chunk #13, size=3200 bytes
+[2026-04-27 19:08:44,026] [INFO] [main] Received audio chunk #14, size=3200 bytes
+[2026-04-27 19:08:44,119] [INFO] [main] Received audio chunk #15, size=3200 bytes
+[2026-04-27 19:08:44,243] [INFO] [main] Received audio chunk #16, size=3200 bytes
+[2026-04-27 19:08:44,349] [INFO] [main] Received audio chunk #17, size=3200 bytes
+[2026-04-27 19:08:44,446] [INFO] [main] Received audio chunk #18, size=3200 bytes
+[2026-04-27 19:08:44,541] [INFO] [main] Received audio chunk #19, size=3200 bytes
+[2026-04-27 19:08:44,634] [INFO] [main] Received audio chunk #20, size=3200 bytes
