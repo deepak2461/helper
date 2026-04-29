@@ -1,21 +1,29 @@
 # ============================================================
 # UI / SCREEN_CAPTURE.PY
 # Screenshot + OCR for coding problem detection
-# Called when user clicks "Capture Screen" button in UI
+# Saves screenshots to /screenshots folder with timestamps
 # ============================================================
 
-import threading
+import numpy as np
+import os
+from datetime import datetime
 from PIL import ImageGrab
 from logger import logger
+
+# -------- Screenshots save folder --------
+SCREENSHOT_DIR = "screenshots"
+os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
 
 # -------- Lazy Load EasyOCR --------
 _reader = None
 
+
 def get_reader():
-    """Load EasyOCR reader once (lazy, heavy to load)."""
+    """Load EasyOCR reader once — heavy, so load lazily."""
     global _reader
     if _reader is None:
-        logger.info("[OCR] Loading EasyOCR reader...")
+        logger.info("[OCR] Loading EasyOCR reader (first time, may take a moment)...")
         import easyocr
         _reader = easyocr.Reader(['en'], gpu=False)
         logger.info("[OCR] EasyOCR reader ready")
@@ -24,22 +32,27 @@ def get_reader():
 
 # -------- Take Screenshot --------
 def take_screenshot():
-    """Capture full screen and return PIL Image."""
+    """Capture full screen, save to /screenshots, return numpy array."""
     try:
         img = ImageGrab.grab()
-        logger.info(f"[OCR] Screenshot taken: {img.size}")
-        return img
+        # -------- Save screenshot with timestamp --------
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = os.path.join(SCREENSHOT_DIR, f"screen_{timestamp}.png")
+        img.save(save_path)
+        logger.info(f"[OCR] Screenshot saved: {save_path} ({img.size})")
+        # -------- Convert PIL Image to numpy array (required by EasyOCR) --------
+        return np.array(img)
     except Exception as e:
         logger.error(f"[OCR] Screenshot failed: {e}")
         return None
 
 
-# -------- Extract Text from Image --------
-def extract_text(image) -> str:
-    """Run OCR on PIL Image and return extracted text."""
+# -------- Extract Text from numpy array --------
+def extract_text(image_array) -> str:
+    """Run OCR on numpy array and return extracted text."""
     try:
         reader = get_reader()
-        results = reader.readtext(image, detail=0, paragraph=True)
+        results = reader.readtext(image_array, detail=0, paragraph=True)
         text = "\n".join(results).strip()
         logger.info(f"[OCR] Extracted {len(text)} chars from screen")
         return text
@@ -48,10 +61,10 @@ def extract_text(image) -> str:
         return ""
 
 
-# -------- Full Pipeline: Screenshot → OCR → Return Text --------
+# -------- Full Pipeline: Screenshot → numpy → OCR → Text --------
 def capture_and_extract() -> str:
-    """Take screenshot and extract all text from it."""
-    image = take_screenshot()
-    if not image:
+    """Take screenshot, save it, extract all text from it."""
+    image_array = take_screenshot()
+    if image_array is None:
         return ""
-    return extract_text(image)
+    return extract_text(image_array)

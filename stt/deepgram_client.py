@@ -104,6 +104,9 @@ class DeepgramSTT:
             channels=1,
             interim_results=True,
             punctuate=True,
+            # -------- Wait longer before finalizing (fixes slow speech gaps) --------
+            endpointing=1500,        # wait 1500ms silence before finalizing
+            utterance_end_ms=2000,   # treat 2s silence as utterance end
         )
 
         if not connection.start(options):

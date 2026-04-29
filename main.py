@@ -65,8 +65,16 @@ def main():
     stt_thread = threading.Thread(target=run_stt, args=(stt, audio_stream), daemon=True)
     stt_thread.start()
 
-    # -------- Launch Desktop Overlay (blocks until window closed) --------
+    # -------- Launch Desktop Overlay (non-blocking) --------
     launch_overlay()
+
+    # -------- Keep main thread alive --------
+    logger.info("[MAIN] App running. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("[MAIN] Shutting down...")
 
 
 if __name__ == "__main__":

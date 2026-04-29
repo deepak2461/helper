@@ -21,6 +21,11 @@ connected_clients: list[WebSocket] = []
 latest_answer = ""
 answer_queue = queue.Queue()
 
+# -------- Global refs (set by main.py) --------
+stt = None
+engine = None
+
+
 # -------- Serve Main UI Page --------
 @app.get("/")
 async def get():
@@ -28,7 +33,7 @@ async def get():
         return HTMLResponse(f.read())
 
 
-# -------- WebSocket Endpoint --------
+# -------- Single WebSocket Endpoint (handles both keep-alive and commands) --------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -36,26 +41,7 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"[WS] Client connected. Total: {len(connected_clients)}")
     try:
         while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
-        logger.info(f"[WS] Client disconnected. Total: {len(connected_clients)}")
-
-
-# -------- Global refs (set by main.py) --------
-stt = None
-engine = None
-
-
-# -------- Handle Commands from UI --------
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    connected_clients.append(websocket)
-    logger.info(f"[WS] Client connected. Total: {len(connected_clients)}")
-    try:
-        while True:
+            # -------- Receive JSON commands from UI --------
             data = await websocket.receive_json()
             cmd = data.get("cmd")
 
@@ -64,6 +50,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 manual = data.get("manual", False)
                 if stt:
                     stt.set_mode(manual)
+                    mode = "MANUAL" if manual else "AUTO"
+                    logger.info(f"[WS] Mode set to {mode}")
 
             # -------- Manual Start --------
             elif cmd == "manual_start":
@@ -75,7 +63,7 @@ async def websocket_endpoint(websocket: WebSocket):
             elif cmd == "manual_stop":
                 if stt:
                     stt.stop_manual()
-                    await broadcast({"type": "status", "text": "⏹️ Processing..."})
+                    await broadcast({"type": "status", "text": "⏳ Processing..."})
 
             # -------- Screen Capture --------
             elif cmd == "capture_screen":
@@ -84,17 +72,34 @@ async def websocket_endpoint(websocket: WebSocket):
                         target=engine.generate_from_screen,
                         daemon=True
                     ).start()
+                else:
+                    logger.warning("[WS] Engine not ready for screen capture")
+            
+            # -------- Direct Ask from input box --------
+            elif cmd == "direct_ask":
+                text = data.get("text", "").strip()
+                if text and engine:
+                    threading.Thread(
+                        target=engine.generate,
+                        args=(text,),
+                        daemon=True
+                    ).start()
 
     except WebSocketDisconnect:
         if websocket in connected_clients:
             connected_clients.remove(websocket)
-
+        logger.info(f"[WS] Client disconnected. Total: {len(connected_clients)}")
+    except Exception as e:
+        logger.error(f"[WS] WebSocket error: {e}")
+        if websocket in connected_clients:
+            connected_clients.remove(websocket)
 
 
 # -------- Broadcast to All Clients --------
 async def broadcast(message: dict):
     global latest_answer
-    # -------- Track latest answer for desktop window polling --------
+
+    # -------- Track latest answer for tkinter polling --------
     if message.get("type") == "answer_chunk":
         latest_answer += message.get("text", "")
         answer_queue.put(("chunk", message.get("text", "")))
@@ -103,7 +108,11 @@ async def broadcast(message: dict):
         answer_queue.put(("question", message.get("text", "")))
     elif message.get("type") == "answer_done":
         answer_queue.put(("done", ""))
-    
+    elif message.get("type") == "status":
+        answer_queue.put(("status", message.get("text", "")))
+    # -------- Track mode changes for UI sync --------
+    elif message.get("type") == "mode_change":
+        answer_queue.put(("mode", message.get("manual", False)))
 
     disconnected = []
     for client in connected_clients:
@@ -116,7 +125,7 @@ async def broadcast(message: dict):
             connected_clients.remove(c)
 
 
-# -------- Thread-safe Broadcast --------
+# -------- Thread-safe Broadcast (called from sync code) --------
 def send_to_clients(message: dict):
     try:
         loop = asyncio.get_event_loop()
