@@ -1,3 +1,11 @@
+# ============================================================
+# STT / DEEPGRAM_CLIENT.PY
+# Deepgram streaming STT client
+# Supports two modes:
+#   - Auto: always listening, detects questions automatically
+#   - Manual: only processes audio between START and STOP signals
+# ============================================================
+
 import threading
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
 
@@ -5,22 +13,52 @@ from logger import logger
 from config import DEEPGRAM_API_KEY
 from utils.question_detector import process_transcript
 
+
 class DeepgramSTT:
     def __init__(self, answer_engine=None):
         self.deepgram = DeepgramClient(api_key=DEEPGRAM_API_KEY)
         self.answer_engine = answer_engine
 
-    def run(self, audio_generator):
-        logger.info("Connecting to Deepgram...")
+        # -------- Mode Control --------
+        self.manual_mode = False       # False = auto, True = manual
+        self.manual_listening = False  # True = currently capturing in manual mode
 
-        # ✅ v7 uses listen.websocket.v("1") not listen.live.v("1")
+    # -------- Manual Mode: Start Listening --------
+    def start_manual(self):
+        self.manual_listening = True
+        logger.info("[STT] Manual mode: START listening")
+
+    # -------- Manual Mode: Stop Listening --------
+    def stop_manual(self):
+        self.manual_listening = False
+        logger.info("[STT] Manual mode: STOP listening")
+
+    # -------- Set Mode --------
+    def set_mode(self, manual: bool):
+        self.manual_mode = manual
+        self.manual_listening = False
+        mode = "MANUAL" if manual else "AUTO"
+        logger.info(f"[STT] Mode set to: {mode}")
+
+    # -------- Process Question + Generate Answer --------
+    def handle_question(self, transcript: str):
+        question = process_transcript(transcript)
+        if question:
+            logger.info(f"[STT] Question detected: {question}")
+            if self.answer_engine:
+                self.answer_engine.generate(question)
+
+    # -------- Main STT Run Loop --------
+    def run(self, audio_generator):
+        logger.info("[STT] Connecting to Deepgram...")
+
         connection = self.deepgram.listen.websocket.v("1")
 
-        # ------------------ EVENT HANDLERS ------------------
-
+        # -------- Event: Connection Opened --------
         def on_open(self_inner, open_obj, **kwargs):
-            logger.info("Deepgram connection opened")
+            logger.info("[STT] Deepgram connection opened")
 
+        # -------- Event: Transcript Received --------
         def on_message(self_inner, result, **kwargs):
             try:
                 transcript = result.channel.alternatives[0].transcript
@@ -28,43 +66,36 @@ class DeepgramSTT:
 
                 if transcript.strip():
                     if not is_final:
-                        #logger.info(f"[FINAL] {transcript}")
-                        # Show live on same line — feels like real-time captions
                         print(f"\r🎤 {transcript}    ", end="", flush=True)
                     else:
-                        # Clear the live line print final
                         print(f"\r✅ {transcript}        ")
-                        logger.info(f"[FINAL] {transcript}")
+                        logger.info(f"[STT] Final: {transcript}")
 
+                        # -------- Auto Mode: always process --------
+                        if not self.manual_mode:
+                            self.handle_question(transcript)
 
-                        question = process_transcript(transcript)
-                        if question:
-                            logger.info(f"[QUESTION] {question}")
-                            if self.answer_engine:
-                                answer = self.answer_engine.generate(question)
-                                if answer :
-                                    logger.info(f"[ANSWER]\n {answer}")
-                            else:
-                                logger.warning("No answer engine provided")
-                    
+                        # -------- Manual Mode: only process if listening --------
+                        elif self.manual_mode and self.manual_listening:
+                            self.handle_question(transcript)
+
             except Exception as e:
-                logger.error(f"Error processing transcript: {e}")
+                logger.error(f"[STT] Message error: {e}")
 
+        # -------- Event: Connection Closed --------
         def on_close(self_inner, close_obj, **kwargs):
-            logger.warning("Deepgram connection closed")
+            logger.warning("[STT] Deepgram connection closed")
 
+        # -------- Event: Error --------
         def on_error(self_inner, error, **kwargs):
-            logger.error(f"Deepgram error: {error}")
-
-        # ------------------ REGISTER EVENTS ------------------
+            logger.error(f"[STT] Deepgram error: {error}")
 
         connection.on(LiveTranscriptionEvents.Open, on_open)
         connection.on(LiveTranscriptionEvents.Transcript, on_message)
         connection.on(LiveTranscriptionEvents.Close, on_close)
         connection.on(LiveTranscriptionEvents.Error, on_error)
 
-        # ------------------ START CONNECTION ------------------
-
+        # -------- Start Connection --------
         options = LiveOptions(
             model="nova-2",
             language="en",
@@ -76,24 +107,19 @@ class DeepgramSTT:
         )
 
         if not connection.start(options):
-            logger.error("Failed to start Deepgram connection. Check your API key.")
+            logger.error("[STT] Failed to start Deepgram connection")
             return
 
-        logger.info("Deepgram started. Speak into your mic...")
+        logger.info("[STT] Deepgram started. Listening...")
 
-        # ------------------ AUDIO LOOP ------------------
-
+        # -------- Audio Stream Loop --------
         try:
             for chunk in audio_generator:
                 connection.send(chunk)
-                #logger.debug(f"Sent chunk: {len(chunk)} bytes")
-
         except KeyboardInterrupt:
-            logger.info("Stopping STT...")
-
+            logger.info("[STT] Stopping...")
         except Exception as e:
-            logger.error(f"Audio streaming error: {e}")
-
+            logger.error(f"[STT] Stream error: {e}")
         finally:
             connection.finish()
-            logger.info("Deepgram connection finished.")
+            logger.info("[STT] Deepgram connection finished")

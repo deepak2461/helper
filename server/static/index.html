@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Helper</title>
+  <style>
+    /* -------- Reset + Base -------- */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: rgba(10, 10, 15, 0.92);
+      color: #f1f5f9;
+      font-family: 'Segoe UI', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* -------- Header Bar -------- */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.04);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      flex-shrink: 0;
+    }
+
+    #header .logo {
+      font-size: 13px;
+      font-weight: 600;
+      color: #a5b4fc;
+      letter-spacing: 0.5px;
+    }
+
+    /* -------- Status Dot -------- */
+    #status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      display: inline-block;
+      margin-right: 6px;
+    }
+    #status-dot.connected { background: #4ade80; }
+
+    #status-text {
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    /* -------- Mode Toggle -------- */
+    #mode-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      flex-shrink: 0;
+    }
+
+    #mode-label {
+      font-size: 11px;
+      color: #64748b;
+      flex: 1;
+    }
+
+    /* -------- Toggle Switch -------- */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .toggle {
+      position: relative;
+      width: 36px; height: 20px;
+    }
+
+    .toggle input { display: none; }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #334155;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .toggle-slider:before {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      background: white;
+      border-radius: 50%;
+      top: 3px; left: 3px;
+      transition: 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider { background: #6366f1; }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+    /* -------- Action Buttons Bar -------- */
+    #actions {
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      flex-shrink: 0;
+    }
+
+    /* -------- Mic Button (Manual mode) -------- */
+    #mic-btn {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 8px;
+      background: #4f46e5;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.15s;
+      display: none;
+    }
+
+    #mic-btn:hover { background: #4338ca; }
+    #mic-btn.listening { background: #dc2626; animation: pulse 1.2s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* -------- Screen Capture Button -------- */
+    #capture-btn {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.07);
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    #capture-btn:hover { background: rgba(255,255,255,0.12); color: white; }
+
+    /* -------- Clear Button -------- */
+    #clear-btn {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.05);
+      color: #64748b;
+      font-size: 11px;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+
+    #clear-btn:hover { background: rgba(255,255,255,0.1); color: #94a3b8; }
+
+    /* -------- Content Area -------- */
+    #content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* -------- Question Box -------- */
+    #question-box {
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid #6366f1;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #a5b4fc;
+      display: none;
+    }
+
+    /* -------- Answer Box -------- */
+    #answer-box {
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 14px;
+      line-height: 1.75;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+      flex: 1;
+      min-height: 80px;
+    }
+
+    #answer-box.streaming {
+      border-left: 3px solid #4ade80;
+    }
+
+    /* -------- Blinking Cursor -------- */
+    .cursor {
+      display: inline-block;
+      width: 2px; height: 15px;
+      background: #4ade80;
+      margin-left: 2px;
+      vertical-align: middle;
+      animation: blink 0.8s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* -------- Status Bar -------- */
+    #status-bar {
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #475569;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- -------- Header Bar -------- -->
+  <div id="header">
+    <span class="logo">⚡ Helper</span>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span id="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+
+  <!-- -------- Mode Toggle Bar -------- -->
+  <div id="mode-bar">
+    <span id="mode-label">🤖 Auto — always listening</span>
+    <div class="toggle-wrap">
+      <span>Auto</span>
+      <label class="toggle">
+        <input type="checkbox" id="mode-toggle" onchange="toggleMode()"/>
+        <span class="toggle-slider"></span>
+      </label>
+      <span>Manual</span>
+    </div>
+  </div>
+
+  <!-- -------- Action Buttons Bar -------- -->
+  <div id="actions">
+    <!-- -------- Mic Button (Manual Mode Only) -------- -->
+    <button id="mic-btn" onclick="toggleMic()">🎙️ Start Listening</button>
+
+    <!-- -------- Screen Capture Button -------- -->
+    <button id="capture-btn" onclick="captureScreen()">📸 Capture Screen</button>
+
+    <!-- -------- Clear Button -------- -->
+    <button id="clear-btn" onclick="clearAll()">✕ Clear</button>
+  </div>
+
+  <!-- -------- Main Content Area -------- -->
+  <div id="content">
+
+    <!-- -------- Question Display -------- -->
+    <div id="question-box"></div>
+
+    <!-- -------- Answer Display -------- -->
+    <div id="answer-box">Waiting for question...</div>
+
+  </div>
+
+  <!-- -------- Bottom Status Bar -------- -->
+  <div id="status-bar" id="bottom-status">Ready</div>
+
+<script>
+  // -------- State --------
+  let ws;
+  let isListening = false;
+  let isManual = false;
+  let currentAnswer = '';
+
+  // -------- WebSocket Connect --------
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+
+    ws.onopen = () => {
+      document.getElementById('status-dot').className = 'connected';
+      document.getElementById('status-text').textContent = 'Connected';
+    };
+
+    ws.onclose = () => {
+      document.getElementById('status-dot').className = '';
+      document.getElementById('status-text').textContent = 'Reconnecting...';
+      setTimeout(connect, 2000);
+    };
+
+    // -------- Handle Incoming Messages --------
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // -------- Question Received --------
+      if (data.type === 'question') {
+        const qBox = document.getElementById('question-box');
+        qBox.style.display = 'block';
+        qBox.textContent = '❓ ' + data.text;
+        currentAnswer = '';
+        const aBox = document.getElementById('answer-box');
+        aBox.className = 'streaming';
+        aBox.innerHTML = '<span class="cursor"></span>';
+      }
+
+      // -------- Answer Chunk Streaming --------
+      if (data.type === 'answer_chunk') {
+        currentAnswer += data.text;
+        document.getElementById('answer-box').innerHTML =
+          currentAnswer + '<span class="cursor"></span>';
+        document.getElementById('content').scrollTop =
+          document.getElementById('content').scrollHeight;
+      }
+
+      // -------- Answer Complete --------
+      if (data.type === 'answer_done') {
+        const aBox = document.getElementById('answer-box');
+        aBox.innerHTML = currentAnswer;
+        aBox.className = '';
+        document.getElementById('status-bar').textContent = 'Ready';
+      }
+
+      // -------- Status Update --------
+      if (data.type === 'status') {
+        document.getElementById('status-bar').textContent = data.text;
+      }
+    };
+  }
+
+  // -------- Mode Toggle --------
+  function toggleMode() {
+    isManual = document.getElementById('mode-toggle').checked;
+    const label = document.getElementById('mode-label');
+    const micBtn = document.getElementById('mic-btn');
+
+    if (isManual) {
+      label.textContent = '🖐️ Manual — press button to listen';
+      micBtn.style.display = 'flex';
+    } else {
+      label.textContent = '🤖 Auto — always listening';
+      micBtn.style.display = 'none';
+      // reset mic state if switching back
+      if (isListening) {
+        isListening = false;
+        micBtn.textContent = '🎙️ Start Listening';
+        micBtn.className = '';
+      }
+    }
+
+    ws.send(JSON.stringify({ cmd: 'set_mode', manual: isManual }));
+  }
+
+  // -------- Mic Button Toggle (Manual Mode) --------
+  function toggleMic() {
+    const btn = document.getElementById('mic-btn');
+    if (!isListening) {
+      isListening = true;
+      btn.textContent = '⏹️ Stop Listening';
+      btn.className = 'listening';
+      document.getElementById('status-bar').textContent = '🎙️ Listening...';
+      ws.send(JSON.stringify({ cmd: 'manual_start' }));
+    } else {
+      isListening = false;
+      btn.textContent = '🎙️ Start Listening';
+      btn.className = '';
+      document.getElementById('status-bar').textContent = '⏳ Processing...';
+      ws.send(JSON.stringify({ cmd: 'manual_stop' }));
+    }
+  }
+
+  // -------- Screen Capture Button --------
+  function captureScreen() {
+    document.getElementById('status-bar').textContent = '📸 Capturing screen...';
+    ws.send(JSON.stringify({ cmd: 'capture_screen' }));
+  }
+
+  // -------- Clear Button --------
+  function clearAll() {
+    document.getElementById('question-box').style.display = 'none';
+    document.getElementById('answer-box').textContent = 'Waiting for question...';
+    document.getElementById('answer-box').className = '';
+    document.getElementById('status-bar').textContent = 'Ready';
+    currentAnswer = '';
+  }
+
+  connect();
+</script>
+</body>
+</html>

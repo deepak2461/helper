@@ -1,3 +1,83 @@
+# ============================================================
+# MAIN.PY
+# Entry point — starts all services and launches overlay
+# ============================================================
+
+import socket
+import time
+import threading
+from dotenv import load_dotenv
+from logger import logger
+from audio.mic_stream import start_mic_stream
+from stt.deepgram_client import DeepgramSTT
+from utils.context_loader import load_context
+from llm.answer_engine import AnswerEngine
+from server.socket_server import start_server_thread
+from ui.overlay import launch_overlay
+
+
+# -------- Get Local IP for Phone Access --------
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
+# -------- STT Thread --------
+def run_stt(stt, audio_stream):
+    stt.run(audio_stream)
+
+
+def main():
+    load_dotenv()
+    logger.info("[MAIN] Starting Helper...")
+
+    # -------- Start WebSocket Server --------
+    start_server_thread()
+    time.sleep(1)
+
+    local_ip = get_local_ip()
+    print(f"\n{'='*45}")
+    print(f"  ✅ Desktop UI : http://localhost:8000")
+    print(f"  📱 Phone UI   : http://{local_ip}:8000")
+    print(f"{'='*45}\n")
+
+    # -------- Load Resume + JD --------
+    context = load_context(resume_path="docs/resume.pdf", jd_path="docs/jd.pdf")
+
+    # -------- Init LLM Engine --------
+    engine = AnswerEngine(resume=context["resume"], jd=context["jd"])
+
+    # -------- Init STT --------
+    stt = DeepgramSTT(answer_engine=engine)
+
+    # -------- Expose STT controls to WebSocket --------
+    # Import here to avoid circular import
+    from server import socket_server
+    socket_server.stt = stt
+    socket_server.engine = engine
+
+    # -------- Start Mic + STT in Background Thread --------
+    audio_stream = start_mic_stream()
+    stt_thread = threading.Thread(target=run_stt, args=(stt, audio_stream), daemon=True)
+    stt_thread.start()
+
+    # -------- Launch Desktop Overlay (blocks until window closed) --------
+    launch_overlay()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+'''
 from audio.mic_stream import start_mic_stream
 from logger import logger
 from stt.deepgram_client import DeepgramSTT
@@ -32,3 +112,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+    
+
+'''

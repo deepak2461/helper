@@ -35,27 +35,6 @@ class AnswerEngine:
         )
         logger.info("[LLM] Answer engine initialized")
 
-    # -------- Screen Capture: Analyse Screen and Answer --------
-    def generate_from_screen(self):
-        """
-        Called when user clicks Capture Screen button.
-        Takes screenshot → OCR → sends to LLM → streams answer.
-        """
-        from ui.screen_capture import capture_and_extract
-        from server.socket_server import send_to_clients
-
-        logger.info("[LLM] Screen capture triggered")
-        send_to_clients({"type": "status", "text": "📸 Analysing screen..."})
-
-        text = capture_and_extract()
-        if not text:
-            logger.warning("[LLM] No text found on screen")
-            send_to_clients({"type": "status", "text": "❌ No text found on screen"})
-            return
-
-        question = f"[Screen content detected — solve or explain this]:\n{text}"
-        self.generate(question)    
-
     def generate(self, question: str) -> str:
         """Generate a human-like answer for the given interview question."""
         logger.info(f"[LLM] Generating answer for: '{question}'")
