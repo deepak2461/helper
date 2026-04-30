@@ -77,7 +77,7 @@ def _run_overlay():
     root.geometry("380x580")
     root.configure(bg="#0d0d14")
     root.attributes("-topmost", True)
-    root.attributes("-alpha", 0.55)    # ← [ Opacity ] Range: 0.0 (invisible) to 1.0 (solid)
+    root.attributes("-alpha", 0.70)    # ← [ Opacity ] Range: 0.0 (invisible) to 1.0 (solid)
     root.resizable(True, True)
 
     # -------- Apply Windows hiding after window is drawn --------
@@ -332,7 +332,7 @@ def _run_overlay():
     # DIRECT ASK INPUT BOX
     # ================================================================
     ask_frame = tk.Frame(root, bg="#0d0d14", pady=6)
-    ask_frame.pack(fill="x", padx=14, side="bottom", before=status_label)
+    ask_frame.pack(fill="x", padx=14)
 
     ask_entry = tk.Text(
         ask_frame, height=2,
