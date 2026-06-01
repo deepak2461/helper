@@ -1,19 +1,18 @@
 # ============================================================
 # UI / OVERLAY.PY
-# Native desktop overlay window using tkinter
+# Native desktop overlay window (tkinter)
 # Features:
-#   - Always on top
-#   - Hidden from screen share (SetWindowDisplayAffinity)
-#   - Hidden from taskbar and Alt-Tab
-#   - Closing window does NOT kill the app (runs in thread)
+#   - Always on top, hidden from screen share + taskbar
+#   - Closing hides window — app keeps running (system tray)
 #   - Mode toggle (Auto / Manual)
-#   - Mic start/stop button (manual mode)
+#   - Manual mic start/stop button
 #   - Screen capture button
-#   - Answer streams in real time via queue polling
+#   - Direct ask input box
+#   - Scrollable answer area with slim dark scrollbar
+#   - Syncs mode with web/phone UI via queue
 # ============================================================
 
 import tkinter as tk
-from tkinter import font as tkfont
 import ctypes
 import threading
 import webbrowser
@@ -22,435 +21,374 @@ from logger import logger
 
 # -------- Windows API Constants --------
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
-GWL_EXSTYLE = -20
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_APPWINDOW  = 0x00040000
+GWL_EXSTYLE            = -20
+WS_EX_TOOLWINDOW       = 0x00000080
+WS_EX_APPWINDOW        = 0x00040000
 
 
-# -------- Get correct HWND for tkinter window --------
+# -------- Get correct HWND --------
 def get_hwnd(root):
-    """Get the actual Windows handle for the tkinter window."""
     return ctypes.windll.user32.GetParent(root.winfo_id())
 
 
-# -------- Hide Window from Screen Share --------
+# -------- Hide from screen share --------
 def hide_from_screenshare(hwnd):
     try:
-        result = ctypes.windll.user32.SetWindowDisplayAffinity(
-            hwnd, WDA_EXCLUDEFROMCAPTURE
-        )
-        if result:
-            logger.info("[UI] Window hidden from screen share")
-        else:
-            logger.warning("[UI] Failed to hide from screen share")
+        result = ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        logger.info("[UI] Screen share hidden" if result else "[UI] Screen share hide failed")
     except Exception as e:
         logger.error(f"[UI] Screen hide error: {e}")
 
 
-# -------- Hide Window from Taskbar and Alt-Tab --------
+# -------- Hide from taskbar + Alt-Tab --------
 def hide_from_taskbar(hwnd):
     try:
-        user32 = ctypes.windll.user32
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        style = (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-        # Force taskbar to refresh
-        root_hwnd = ctypes.windll.user32.GetDesktopWindow()
-        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0023)
-        logger.info("[UI] Window hidden from taskbar")
+        u = ctypes.windll.user32
+        style = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        u.SetWindowLongW(hwnd, GWL_EXSTYLE, (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW)
+        u.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0023)
+        logger.info("[UI] Taskbar hidden")
     except Exception as e:
         logger.error(f"[UI] Taskbar hide error: {e}")
 
 
-# -------- Build and Run the Tkinter Window --------
+# ============================================================
+# MAIN OVERLAY FUNCTION
+# ============================================================
 def _run_overlay():
     from server import socket_server
-    
-    # -------- Start system tray --------
-    from ui.tray import start_tray
-    overlay_root_ref = [None]
-    start_tray(overlay_root_ref)
 
     root = tk.Tk()
-    overlay_root_ref[0] = root
-    root.title("Helper")
-    root.geometry("380x580")
+    root.title("HELPER")                          # no title text
+    root.geometry("380x600")
     root.configure(bg="#0d0d14")
     root.attributes("-topmost", True)
-    root.attributes("-alpha", 0.70)    # ← [ Opacity ] Range: 0.0 (invisible) to 1.0 (solid)
+    root.attributes("-alpha", 0.96)         # opacity — change here
     root.resizable(True, True)
+    root.overrideredirect(False)            # keep window chrome for dragging -- If set to True this removes the op bar check later , but close and other options such as dragging , min , max will be lost as well
 
-    # -------- Apply Windows hiding after window is drawn --------
+    # -------- Apply hiding --------
     root.update()
     hwnd = get_hwnd(root)
     hide_from_screenshare(hwnd)
     hide_from_taskbar(hwnd)
 
-    # -------- Closing window hides it, does NOT kill app --------
+    # -------- Closing hides window, does NOT kill app --------
     def on_close():
-        logger.info("[UI] Overlay hidden — still running. Check system tray.")
-        root.withdraw()  # hide instead of destroy
+        logger.info("[UI] Window hidden — app still running")
+        root.withdraw()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     # ================================================================
     # HEADER BAR
     # ================================================================
-    header = tk.Frame(root, bg="#13131f", pady=10)
-    header.pack(fill="x", padx=0)
+    header = tk.Frame(root, bg="#13131f", pady=0)
+    header.pack(fill="x")
 
-    tk.Label(
-        header, text="⚡ Helper",
-        bg="#13131f", fg="#818cf8",
-        font=("Segoe UI", 13, "bold")
-    ).pack(side="left", padx=14)
+    # -------- Remove default tkinter white border by using custom header --------
+    inner_header = tk.Frame(header, bg="#13131f", pady=8)
+    inner_header.pack(fill="x", padx=12)
+
+    tk.Label(inner_header, text="⚡ Helper",
+             bg="#13131f", fg="#818cf8",
+             font=("Segoe UI", 12, "bold")).pack(side="left")
 
     # -------- Globe icon — open browser (no button look) --------
-    globe_label = tk.Label(
-        header, text="🌐",
-        bg="#13131f", fg="#475569",
-        font=("Segoe UI", 13),
-        cursor="hand2"
-    )
-    globe_label.pack(side="right", padx=14)
-    globe_label.bind("<Button-1>", lambda e: webbrowser.open("http://localhost:8000"))
-    globe_label.bind("<Enter>", lambda e: globe_label.config(fg="#94a3b8"))
-    globe_label.bind("<Leave>", lambda e: globe_label.config(fg="#475569"))
+    globe = tk.Label(inner_header, text="🌐",
+                     bg="#13131f", fg="#334155",
+                     font=("Segoe UI", 12), cursor="hand2")
+    globe.pack(side="right")
+    globe.bind("<Button-1>", lambda e: webbrowser.open("http://localhost:8000"))
+    globe.bind("<Enter>", lambda e: globe.config(fg="#818cf8"))
+    globe.bind("<Leave>", lambda e: globe.config(fg="#334155"))
 
     # Status dot
-    status_dot = tk.Label(
-        header, text="●",
-        bg="#13131f", fg="#4ade80",
-        font=("Segoe UI", 10)
-    )
-    status_dot.pack(side="right", padx=(0, 4))
+    status_dot = tk.Label(inner_header, text="●",
+                          bg="#13131f", fg="#4ade80",
+                          font=("Segoe UI", 9))
+    status_dot.pack(side="right", padx=(0, 6))
 
     tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
 
     # ================================================================
-    # MODE TOGGLE BAR (Auto / Manual)
+    # MODE TOGGLE BAR
     # ================================================================
-    mode_frame = tk.Frame(root, bg="#0d0d14", pady=8)
-    mode_frame.pack(fill="x", padx=14)
+    mode_frame = tk.Frame(root, bg="#0d0d14", pady=7)
+    mode_frame.pack(fill="x", padx=12)
 
-    mode_label = tk.Label(
-        mode_frame, text="🤖 Auto — always listening",
-        bg="#0d0d14", fg="#64748b",
-        font=("Segoe UI", 9)
-    )
+    mode_label = tk.Label(mode_frame, text="🤖 Auto — always listening",
+                          bg="#0d0d14", fg="#475569",
+                          font=("Segoe UI", 9))
     mode_label.pack(side="left")
 
-    is_manual = [False]
-
-    # -------- Simple toggle button (styled as pill) --------
-    toggle_btn = tk.Label(
-        mode_frame, text="AUTO",
-        bg="#1e293b", fg="#94a3b8",
-        font=("Segoe UI", 8, "bold"),
-        padx=8, pady=3,
-        cursor="hand2",
-        relief="flat"
-    )
-    toggle_btn.pack(side="right")
-
-    def toggle_mode(e=None):
-        is_manual[0] = not is_manual[0]
-        if is_manual[0]:
-            toggle_btn.config(text="MANUAL", bg="#4f46e5", fg="white")
-            mode_label.config(text="🖐️ Manual — press button to listen")
-            mic_frame.pack(fill="x", padx=14, pady=(0, 6) , before=action_frame)
-        else:
-            toggle_btn.config(text="AUTO", bg="#1e293b", fg="#94a3b8")
-            mode_label.config(text="🤖 Auto — always listening")
-            mic_frame.pack_forget()
-            # reset mic if active
-            if is_mic_active[0]:
-                toggle_mic()
-
-        if socket_server.stt:
-            socket_server.stt.set_mode(is_manual[0])
-            # -------- Sync web UI toggle --------
-            from server.socket_server import send_to_clients
-            send_to_clients({"type": "mode_change", "manual": is_manual[0]})
-
-    toggle_btn.bind("<Button-1>", toggle_mode)
-
-    tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
-
-    # ================================================================
-    # MIC BUTTON (Manual mode only — hidden by default)
-    # ================================================================
-    mic_frame = tk.Frame(root, bg="#0d0d14")
-    # not packed yet — shown only in manual mode
-
+    is_manual    = [False]
     is_mic_active = [False]
 
-    mic_btn = tk.Label(
-        mic_frame, text="🎙️  Start Listening",
-        bg="#4f46e5", fg="white",
-        font=("Segoe UI", 10, "bold"),
-        padx=12, pady=7,
-        cursor="hand2",
-        anchor="center"
-    )
-    mic_btn.pack(fill="x")
-
-    def toggle_mic(e=None):
-        if not is_mic_active[0]:
-            is_mic_active[0] = True
-            mic_btn.config(text="⏹️  Stop Listening", bg="#dc2626")
-            status_label.config(text="🎙️ Listening...")
-            if socket_server.stt:
-                socket_server.stt.start_manual()
-        else:
-            is_mic_active[0] = False
-            mic_btn.config(text="🎙️  Start Listening", bg="#4f46e5")
-            status_label.config(text="⏳ Processing...")
-            if socket_server.stt:
-                socket_server.stt.stop_manual()
-
-    mic_btn.bind("<Button-1>", toggle_mic)
-
-    # ================================================================
-    # ACTION ROW (Capture Screen)
-    # ================================================================
-    action_frame = tk.Frame(root, bg="#0d0d14", pady=8)
-    action_frame.pack(fill="x", padx=14)
-
-    # -------- Screen Capture Button --------
-    def do_capture(e=None):
-        if socket_server.engine:
-            status_label.config(text="📸 Capturing screen...")
-            threading.Thread(
-                target=socket_server.engine.generate_from_screen,
-                daemon=True
-            ).start()
-        else:
-            status_label.config(text="❌ Engine not ready")
-
-    capture_btn = tk.Label(
-        action_frame,
-        text="📸  Capture Screen",
-        bg="#1e293b", fg="#94a3b8",
-        font=("Segoe UI", 9),
-        padx=10, pady=5,
-        cursor="hand2"
-    )
-    capture_btn.pack(side="left")
-    capture_btn.bind("<Button-1>", do_capture)
-    capture_btn.bind("<Enter>", lambda e: capture_btn.config(fg="white"))
-    capture_btn.bind("<Leave>", lambda e: capture_btn.config(fg="#94a3b8"))
-
-    # -------- Clear Button --------
-    def do_clear(e=None):
-        current_text[0] = ""
-        answer_text.config(state="normal")
-        answer_text.delete("1.0", tk.END)
-        answer_text.insert(tk.END, "Waiting for question...")
-        answer_text.config(state="disabled", fg="#475569")
-        question_label.config(text="")
-        question_frame.pack_forget()
-        status_label.config(text="Ready")
-
-    clear_btn = tk.Label(
-        action_frame,
-        text="✕ Clear",
-        bg="#0d0d14", fg="#334155",
-        font=("Segoe UI", 9),
-        padx=10, pady=5,
-        cursor="hand2"
-    )
-    clear_btn.pack(side="right")
-    clear_btn.bind("<Button-1>", do_clear)
-    clear_btn.bind("<Enter>", lambda e: clear_btn.config(fg="#64748b"))
-    clear_btn.bind("<Leave>", lambda e: clear_btn.config(fg="#334155"))
+    toggle_pill = tk.Label(mode_frame, text="AUTO",
+                           bg="#1e293b", fg="#64748b",
+                           font=("Segoe UI", 8, "bold"),
+                           padx=8, pady=2, cursor="hand2")
+    toggle_pill.pack(side="right")
 
     tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
 
     # ================================================================
-    # QUESTION DISPLAY
+    # MIC BUTTON FRAME (shown only in manual mode)
     # ================================================================
-    question_frame = tk.Frame(root, bg="#13131f", pady=0)
+    mic_outer = tk.Frame(root, bg="#0d0d14")
+    # not packed yet
+
+    mic_btn = tk.Label(mic_outer, text="🎙️  Start Listening",
+                       bg="#4f46e5", fg="white",
+                       font=("Segoe UI", 10, "bold"),
+                       pady=7, cursor="hand2", anchor="center")
+    mic_btn.pack(fill="x", padx=12, pady=6)
+
+    # ================================================================
+    # ACTION ROW
+    # ================================================================
+    action_row = tk.Frame(root, bg="#0d0d14", pady=6)
+    action_row.pack(fill="x", padx=12)
+
+    # -------- Screen Capture Button --------
+    capture_lbl = tk.Label(action_row, text="📸 Capture Screen",
+                           bg="#1e293b", fg="#64748b",
+                           font=("Segoe UI", 9),
+                           padx=10, pady=4, cursor="hand2")
+    capture_lbl.pack(side="left")
+
+    # -------- Clear Button --------
+    clear_lbl = tk.Label(action_row, text="✕ Clear",
+                         bg="#0d0d14", fg="#334155",
+                         font=("Segoe UI", 9),
+                         padx=10, pady=4, cursor="hand2")
+    clear_lbl.pack(side="right")
+
+    tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
+
+    # ================================================================
+    # QUESTION LABEL
+    # ================================================================
+    question_frame = tk.Frame(root, bg="#13131f")
     # packed only when question arrives
 
-    question_label = tk.Label(
-        question_frame,
-        text="",
-        bg="#13131f", fg="#818cf8",
-        font=("Segoe UI", 9, "italic"),
-        wraplength=340,
-        justify="left",
-        anchor="w",
-        padx=14, pady=6
-    )
-    question_label.pack(fill="x")
-    
-    # ================================================================
-    # ANSWER DISPLAY (scrollable text area)
-    # ================================================================
-    answer_frame = tk.Frame(root, bg="#0d0d14")
-    answer_frame.pack(fill="both", expand=True, padx=14, pady=10)
-    '''
-    answer_text = tk.Text(
-        answer_frame,
-        bg="#0d0d14", fg="#475569",
-        font=("Segoe UI", 11),
-        wrap="word",
-        relief="flat",
-        padx=4, pady=4,
-        state="disabled",
-        cursor="arrow",
-        selectbackground="#1e293b"
-    )
-    answer_text.pack(fill="both", expand=True)
+    question_lbl = tk.Label(question_frame, text="",
+                            bg="#13131f", fg="#818cf8",
+                            font=("Segoe UI", 9, "italic"),
+                            wraplength=340, justify="left",
+                            anchor="w", padx=12, pady=5)
+    question_lbl.pack(fill="x")
 
-    # insert placeholder
+    # ================================================================
+    # ANSWER AREA (scrollable, slim dark scrollbar)
+    # ================================================================
+    answer_outer = tk.Frame(root, bg="#0d0d14")
+    answer_outer.pack(fill="both", expand=True, padx=12, pady=8)
+
+    # -------- Custom slim scrollbar --------
+    scrollbar = tk.Scrollbar(answer_outer, orient="vertical",
+                             width=4,
+                             troughcolor="#0d0d14",
+                             bg="#1e293b",
+                             activebackground="#334155",
+                             relief="flat", bd=0)
+    scrollbar.pack(side="right", fill="y")
+
+    answer_text = tk.Text(answer_outer,
+                          bg="#0d0d14", fg="#475569",
+                          font=("Segoe UI", 11),
+                          wrap="word", relief="flat",
+                          padx=4, pady=4,
+                          state="disabled", cursor="arrow",
+                          selectbackground="#1e293b",
+                          yscrollcommand=scrollbar.set,
+                          insertbackground="#818cf8")
+    answer_text.pack(side="left", fill="both", expand=True)
+    scrollbar.config(command=answer_text.yview)
+
+    # Insert placeholder
     answer_text.config(state="normal")
     answer_text.insert(tk.END, "Waiting for question...")
     answer_text.config(state="disabled")
-    '''
-
-    # -------- Answer Display with Scrollbar --------
-    answer_scroll = tk.Scrollbar(answer_frame)
-    answer_scroll.pack(side="right", fill="y")
-
-    answer_text = tk.Text(
-        answer_frame,
-        bg="#0d0d14", fg="#475569",
-        font=("Segoe UI", 11),
-        wrap="word", relief="flat",
-        padx=4, pady=4,
-        state="disabled", cursor="arrow",
-        selectbackground="#1e293b",
-        yscrollcommand=answer_scroll.set
-    )
-    answer_text.pack(fill="both", expand=True)
-    answer_scroll.config(command=answer_text.yview)
-
 
     # ================================================================
     # DIRECT ASK INPUT BOX
     # ================================================================
-    ask_frame = tk.Frame(root, bg="#0d0d14", pady=6)
-    ask_frame.pack(fill="x", padx=14)
+    tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
 
-    ask_entry = tk.Text(
-        ask_frame, height=2,
-        bg="#13131f", fg="#e2e8f0",
-        font=("Segoe UI", 10),
-        relief="flat", padx=8, pady=6,
-        wrap="word", insertbackground="#818cf8"
-    )
+    ask_frame = tk.Frame(root, bg="#13131f", pady=6)
+    ask_frame.pack(fill="x", padx=12)
+
+    ask_entry = tk.Text(ask_frame, height=2,
+                        bg="#1e293b", fg="#334155",
+                        font=("Segoe UI", 10),
+                        relief="flat", padx=8, pady=5,
+                        wrap="word", insertbackground="#818cf8")
     ask_entry.pack(side="left", fill="x", expand=True)
     ask_entry.insert("1.0", "Ask anything...")
-    ask_entry.config(fg="#334155")
 
-    # -------- Placeholder behaviour --------
-    def on_ask_focus_in(e):
+    def ask_focus_in(e):
         if ask_entry.get("1.0", tk.END).strip() == "Ask anything...":
             ask_entry.delete("1.0", tk.END)
             ask_entry.config(fg="#e2e8f0")
 
-    def on_ask_focus_out(e):
+    def ask_focus_out(e):
         if not ask_entry.get("1.0", tk.END).strip():
             ask_entry.insert("1.0", "Ask anything...")
             ask_entry.config(fg="#334155")
 
-    ask_entry.bind("<FocusIn>", on_ask_focus_in)
-    ask_entry.bind("<FocusOut>", on_ask_focus_out)
+    ask_entry.bind("<FocusIn>", ask_focus_in)
+    ask_entry.bind("<FocusOut>", ask_focus_out)
 
-    # -------- Send on Enter --------
-    def send_direct(e=None):
-        text = ask_entry.get("1.0", tk.END).strip()
-        if not text or text == "Ask anything...":
-            return "break"
-        ask_entry.delete("1.0", tk.END)
-        if socket_server.engine:
-            status_label.config(text="💬 Asking...")
-            threading.Thread(
-                target=socket_server.engine.generate,
-                args=(text,),
-                daemon=True
-            ).start()
-        return "break"  # prevents newline on Enter
-
-    ask_btn = tk.Label(
-        ask_frame, text="↑",
-        bg="#4f46e5", fg="white",
-        font=("Segoe UI", 12, "bold"),
-        padx=10, pady=6,
-        cursor="hand2"
-    )
-    ask_btn.pack(side="right", padx=(6, 0))
-    ask_btn.bind("<Button-1>", send_direct)
-    ask_entry.bind("<Return>", send_direct)
-
+    # -------- Send button --------
+    send_btn = tk.Label(ask_frame, text="↑",
+                        bg="#4f46e5", fg="white",
+                        font=("Segoe UI", 13, "bold"),
+                        padx=10, pady=5, cursor="hand2")
+    send_btn.pack(side="right", padx=(6, 0))
 
     # ================================================================
     # STATUS BAR
     # ================================================================
     tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
-    status_label = tk.Label(
-        root, text="Ready",
-        bg="#0d0d14", fg="#334155",
-        font=("Segoe UI", 8),
-        anchor="w", padx=14
-    )
-    status_label.pack(fill="x", pady=4)
+    status_lbl = tk.Label(root, text="Ready",
+                          bg="#0d0d14", fg="#334155",
+                          font=("Segoe UI", 8),
+                          anchor="w", padx=12)
+    status_lbl.pack(fill="x", pady=3)
 
     # ================================================================
-    # QUEUE POLLING — Update UI from background threads
+    # HELPER FUNCTIONS
     # ================================================================
     current_text = [""]
 
-    def poll_answer():
+    def set_answer_text(text, color="#e2e8f0"):
+        answer_text.config(state="normal")
+        answer_text.delete("1.0", tk.END)
+        if text:
+            answer_text.insert(tk.END, text)
+        answer_text.config(state="disabled", fg=color)
+        answer_text.see(tk.END)
+
+    def do_clear(e=None):
+        current_text[0] = ""
+        set_answer_text("Waiting for question...", color="#475569")
+        question_lbl.config(text="")
+        question_frame.pack_forget()
+        status_lbl.config(text="Ready")
+
+    def send_direct(e=None):
+        text = ask_entry.get("1.0", tk.END).strip()
+        if not text or text == "Ask anything...":
+            return "break"
+        ask_entry.delete("1.0", tk.END)
+        ask_entry.config(fg="#334155")
+        if socket_server.engine:
+            status_lbl.config(text="💬 Asking...")
+            threading.Thread(
+                target=socket_server.engine.generate,
+                args=(text,),
+                daemon=True
+            ).start()
+        return "break"
+
+    def do_capture(e=None):
+        if socket_server.engine:
+            status_lbl.config(text="📸 Capturing...")
+            threading.Thread(
+                target=socket_server.engine.generate_from_screen,
+                daemon=True
+            ).start()
+
+    def toggle_mic(e=None):
+        if not is_mic_active[0]:
+            is_mic_active[0] = True
+            mic_btn.config(text="⏹️  Stop Listening", bg="#dc2626")
+            status_lbl.config(text="🎙️ Listening...")
+            if socket_server.stt:
+                socket_server.stt.start_manual()
+        else:
+            is_mic_active[0] = False
+            mic_btn.config(text="🎙️  Start Listening", bg="#4f46e5")
+            status_lbl.config(text="⏳ Processing...")
+            if socket_server.stt:
+                socket_server.stt.stop_manual()
+
+    def toggle_mode(e=None):
+        is_manual[0] = not is_manual[0]
+        manual = is_manual[0]
+        if manual:
+            toggle_pill.config(text="MANUAL", bg="#4f46e5", fg="white")
+            mode_label.config(text="🖐️ Manual — press button to listen")
+            mic_outer.pack(fill="x", after=mode_frame)
+        else:
+            toggle_pill.config(text="AUTO", bg="#1e293b", fg="#64748b")
+            mode_label.config(text="🤖 Auto — always listening")
+            mic_outer.pack_forget()
+            if is_mic_active[0]:
+                toggle_mic()
+
+        if socket_server.stt:
+            socket_server.stt.set_mode(manual)
+
+        # -------- Sync web + phone UI --------
+        from server.socket_server import send_to_clients
+        send_to_clients({"type": "mode_change", "manual": manual})
+
+    # -------- Bind events --------
+    toggle_pill.bind("<Button-1>", toggle_mode)
+    mic_btn.bind("<Button-1>", toggle_mic)
+    capture_lbl.bind("<Button-1>", do_capture)
+    capture_lbl.bind("<Enter>", lambda e: capture_lbl.config(fg="white"))
+    capture_lbl.bind("<Leave>", lambda e: capture_lbl.config(fg="#64748b"))
+    clear_lbl.bind("<Button-1>", do_clear)
+    clear_lbl.bind("<Enter>", lambda e: clear_lbl.config(fg="#64748b"))
+    clear_lbl.bind("<Leave>", lambda e: clear_lbl.config(fg="#334155"))
+    send_btn.bind("<Button-1>", send_direct)
+    ask_entry.bind("<Return>", send_direct)
+
+    # ================================================================
+    # QUEUE POLLING — update UI from background threads
+    # ================================================================
+    def poll():
         try:
             while not socket_server.answer_queue.empty():
                 msg_type, text = socket_server.answer_queue.get_nowait()
 
-                # -------- Question arrived --------
                 if msg_type == "question":
                     current_text[0] = ""
-                    question_label.config(text=f"❓ {text}")
-                    question_frame.pack(fill="x", after=action_frame)
-                    answer_text.config(state="normal")
-                    answer_text.delete("1.0", tk.END)
-                    answer_text.config(fg="#e2e8f0", state="disabled")
-                    status_label.config(text="⏳ Generating...")
+                    question_lbl.config(text=f"❓ {text}")
+                    question_frame.pack(fill="x", after=action_row)
+                    set_answer_text("", color="#e2e8f0")
+                    status_lbl.config(text="⏳ Generating...")
 
-                # -------- Answer chunk streaming --------
                 elif msg_type == "chunk":
                     current_text[0] += text
-                    answer_text.config(state="normal")
-                    answer_text.delete("1.0", tk.END)
-                    answer_text.insert(tk.END, current_text[0])
-                    answer_text.see(tk.END)
-                    answer_text.config(state="disabled")
+                    set_answer_text(current_text[0])
 
-                # -------- Answer complete --------
                 elif msg_type == "done":
-                    status_label.config(text="✅ Ready")
+                    status_lbl.config(text="✅ Ready")
 
-                # -------- Status update --------
                 elif msg_type == "status":
-                    status_label.config(text=text)
+                    status_lbl.config(text=text)
+
+                elif msg_type == "mode":
+                    # Web UI changed mode — sync tkinter toggle
+                    new_manual = text  # text holds bool here
+                    if new_manual != is_manual[0]:
+                        toggle_mode()  # toggle to match
 
         except Exception as e:
             logger.error(f"[UI] Poll error: {e}")
 
-        root.after(100, poll_answer)
+        root.after(100, poll)
 
-    poll_answer()
+    poll()
     root.mainloop()
 
 
-# -------- Launch Overlay in Background Thread --------
+# -------- Launch in background thread --------
 def launch_overlay():
-    """
-    Runs the tkinter window in its own thread.
-    Closing the window hides it — does NOT kill the app.
-    App continues running for phone UI access.
-    """
-    logger.info("[UI] Launching overlay in background thread...")
-    thread = threading.Thread(target=_run_overlay, daemon=True)
-    thread.start()
+    logger.info("[UI] Launching overlay...")
+    threading.Thread(target=_run_overlay, daemon=True).start()
