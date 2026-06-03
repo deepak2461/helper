@@ -88,6 +88,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         args=(text,),
                         daemon=True
                     ).start()
+            
+            # -------- Timer reset (user clicked timer button to extend timeout) --------
+            elif cmd == "reset_timer":
+                # UI will handle resetting its timer, server just broadcasts to sync all clients
+                await broadcast({"type": "timer_reset"})
 
     except WebSocketDisconnect:
         if websocket in connected_clients:

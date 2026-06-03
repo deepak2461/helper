@@ -156,7 +156,14 @@ def _run_overlay():
                            bg="#1e293b", fg="#64748b",
                            font=("Segoe UI", 9),
                            padx=10, pady=4, cursor="hand2")
-    capture_lbl.pack(side="left")
+    capture_lbl.pack(side="left", padx=(0, 6))
+
+    # -------- Timeout Timer Button (hidden initially, appears after 10s) --------
+    timeout_timer = tk.Label(action_row, text="⏱️ 20s",
+                             bg="#1e293b", fg="#f59e0b",
+                             font=("Segoe UI", 8, "bold"),
+                             padx=8, pady=4, cursor="hand2")
+    # Timer starts hidden, shown by poll() after 10s
 
     # -------- Clear Button --------
     clear_lbl = tk.Label(action_row, text="✕ Clear",
@@ -380,9 +387,29 @@ def _run_overlay():
     send_btn.bind("<Button-1>", send_direct)
     ask_entry.bind("<Return>", send_direct)
 
+    # -------- Timer button interaction --------
+    def reset_timeout_timer(e=None):
+        """User clicked timer button to reset the timeout countdown"""
+        logger.info("[UI] Timer reset requested")
+        timer_state["start_time"] = time.time()
+        timer_state["shown"] = False
+        timeout_timer.pack_forget()
+        
+        # Notify server to sync reset across all clients
+        from server.socket_server import send_to_clients
+        send_to_clients({"type": "timer_reset"})
+
+    timeout_timer.bind("<Button-1>", reset_timeout_timer)
+    timeout_timer.bind("<Enter>", lambda e: timeout_timer.config(fg="#fbbf24"))
+    timeout_timer.bind("<Leave>", lambda e: timeout_timer.config(fg="#f59e0b"))
+
     # ================================================================
     # QUEUE POLLING — update UI from background threads
     # ================================================================
+    
+    # Timer state tracking
+    timer_state = {"start_time": time.time(), "shown": False}
+
     def poll():
         try:
             while not socket_server.answer_queue.empty():
@@ -413,6 +440,25 @@ def _run_overlay():
 
         except Exception as e:
             logger.error(f"[UI] Poll error: {e}")
+
+        # -------- Timer countdown logic --------
+        # Timer shows after 10 seconds, counts from 20 down to 0
+        elapsed = time.time() - timer_state["start_time"]
+        
+        if elapsed >= 10 and not timer_state["shown"]:  # Show timer after 10s
+            timer_state["shown"] = True
+            timeout_timer.pack(side="left", padx=(0, 6))
+            logger.debug("[UI] Timer button shown")
+        
+        if timer_state["shown"]:
+            remaining = max(0, 20 - int(elapsed))  # 20 sec total timeout
+            timeout_timer.config(text=f"⏱️ {remaining}s")
+            
+            if remaining == 0:
+                # Timeout occurred - user should have clicked to reset
+                logger.warning("[UI] Timeout countdown reached 0")
+                timeout_timer.pack_forget()
+                timer_state["shown"] = False
 
         root.after(100, poll)
 

@@ -8,6 +8,7 @@
 # ============================================================
 
 import threading
+import time
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
 
 from logger import logger
@@ -23,30 +24,38 @@ class DeepgramSTT:
         # -------- Mode control --------
         self.manual_mode = False
         self.manual_listening = False
+        self.mode_lock = threading.Lock()  # Thread-safe mode switching
 
         # -------- Manual mode text buffer --------
         # Accumulates all finals between START and STOP
         self.manual_buffer = []
+        
+        # -------- Keep-alive tracking --------
+        self.last_audio_time = None
+        self.keep_alive_interval = 8  # Send keep-alive every 8 secs to prevent 10sec timeout
 
     # -------- Set mode (called from UI) --------
     def set_mode(self, manual: bool):
-        self.manual_mode = manual
-        self.manual_listening = False
-        self.manual_buffer = []
-        logger.info(f"[STT] Mode set to: {'MANUAL' if manual else 'AUTO'}")
+        with self.mode_lock:
+            self.manual_mode = manual
+            self.manual_listening = False
+            self.manual_buffer = []
+            logger.info(f"[STT] Mode set to: {'MANUAL' if manual else 'AUTO'}")
 
     # -------- Manual START — begin buffering --------
     def start_manual(self):
-        self.manual_listening = True
-        self.manual_buffer = []  # clear previous buffer
-        logger.info("[STT] Manual: START listening")
+        with self.mode_lock:
+            self.manual_listening = True
+            self.manual_buffer = []  # clear previous buffer
+            logger.info("[STT] Manual: START listening")
 
     # -------- Manual STOP — flush buffer to LLM --------
     def stop_manual(self):
-        self.manual_listening = False
-        full_text = " ".join(self.manual_buffer).strip()
-        self.manual_buffer = []
-        logger.info(f"[STT] Manual: STOP. Buffer: '{full_text}'")
+        with self.mode_lock:
+            self.manual_listening = False
+            full_text = " ".join(self.manual_buffer).strip()
+            self.manual_buffer = []
+            logger.info(f"[STT] Manual: STOP. Buffer: '{full_text}'")
 
         if full_text and self.answer_engine:
             logger.info(f"[STT] Sending manual buffer to LLM: '{full_text}'")
@@ -58,20 +67,36 @@ class DeepgramSTT:
 
     # -------- Process a final transcript --------
     def handle_transcript(self, transcript: str):
-        if self.manual_mode:
-            if self.manual_listening:
+        with self.mode_lock:
+            is_manual = self.manual_mode
+            is_listening = self.manual_listening
+        
+        if is_manual:
+            if is_listening:
                 # -------- Buffer everything in manual mode --------
                 self.manual_buffer.append(transcript)
-                logger.debug(f"[STT] Buffered: '{transcript}'")
+                logger.debug(f"[STT] Buffered (manual): '{transcript}'")
+            else:
+                # In manual mode but not listening - ignore transcript
+                logger.debug(f"[STT] Ignored (manual mode, not listening): '{transcript}'")
         else:
             # -------- Auto mode: detect question and answer --------
             question = process_transcript(transcript)
             if question and self.answer_engine:
+                logger.info(f"[STT] Question detected (auto mode): '{question}'")
                 threading.Thread(
                     target=self.answer_engine.generate,
                     args=(question,),
                     daemon=True
                 ).start()
+            else:
+                logger.debug(f"[STT] Not a question (auto mode): '{transcript}'")
+
+    # -------- Notify UI of timeout status --------
+    def notify_ui_timeout(self, remaining_secs):
+        """Notify UI of remaining time before connection timeout"""
+        from server.socket_server import send_to_clients
+        send_to_clients({"type": "timeout_warning", "remaining": remaining_secs})
 
     # -------- Main STT run loop --------
     def run(self, audio_generator):
@@ -82,6 +107,7 @@ class DeepgramSTT:
         # -------- Event: Connection opened --------
         def on_open(self_inner, open_obj, **kwargs):
             logger.info("[STT] Deepgram connection opened")
+            self.last_audio_time = time.time()
 
         # -------- Event: Transcript received --------
         def on_message(self_inner, result, **kwargs):
@@ -123,8 +149,8 @@ class DeepgramSTT:
             channels=1,
             interim_results=True,
             punctuate=True,
-            endpointing=1500,
-            utterance_end_ms=2000,
+            endpointing=2500,  # Increased from 1500ms to 2500ms to handle word gaps better
+            utterance_end_ms=3000,  # Increased from 2000ms to 3000ms to wait longer before closing
         )
 
         if not connection.start(options):
@@ -132,10 +158,31 @@ class DeepgramSTT:
             return
 
         logger.info("[STT] Deepgram started. Listening...")
+        self.last_audio_time = time.time()
+
+        # -------- Keep-alive thread to prevent 20 second timeout --------
+        def keep_alive_thread():
+            """Send silent audio frames every 8 seconds to keep connection alive"""
+            while True:
+                try:
+                    if self.last_audio_time and time.time() - self.last_audio_time > self.keep_alive_interval:
+                        # Send silent audio frame to keep connection alive
+                        silent_frame = b'\x00' * 3200  # ~100ms of silence at 16kHz
+                        connection.send(silent_frame)
+                        logger.debug("[STT] Keep-alive ping sent")
+                        self.last_audio_time = time.time()
+                    time.sleep(1)
+                except Exception as e:
+                    logger.debug(f"[STT] Keep-alive thread error (connection may be closing): {e}")
+                    break
+
+        keepalive_thread = threading.Thread(target=keep_alive_thread, daemon=True)
+        keepalive_thread.start()
 
         # -------- Audio stream loop --------
         try:
             for chunk in audio_generator:
+                self.last_audio_time = time.time()
                 connection.send(chunk)
         except KeyboardInterrupt:
             logger.info("[STT] Stopping...")
