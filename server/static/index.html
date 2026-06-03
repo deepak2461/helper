@@ -90,6 +90,23 @@
       font-size: 12px; cursor: pointer; transition: 0.15s;
     }
     #capture-btn:hover { background: #273548; color: white; }
+    
+    /* -------- Timer Button (shows after 10s) -------- */
+    #timer-btn {
+      padding: 7px 10px; border: none; border-radius: 7px;
+      background: #1e293b; color: #f59e0b;
+      font-size: 11px; font-weight: 600; cursor: pointer; transition: 0.15s;
+      display: none;
+    }
+    #timer-btn:hover { background: #273548; color: #fbbf24; }
+    
+    /* -------- Clear Button -------- */
+    #clear-btn {
+      padding: 7px 10px; border: none; border-radius: 7px;
+      background: transparent; color: #334155;
+      font-size: 11px; cursor: pointer; transition: 0.15s;
+    }
+    #clear-btn:hover { color: #64748b; }
 
     /* -------- Clear Button -------- */
     #clear-btn {
@@ -205,6 +222,8 @@
     <button id="mic-btn" onclick="toggleMic()">🎙️ Start Listening</button>
     <!-- -------- Screen Capture Button -------- -->
     <button id="capture-btn" onclick="captureScreen()">📸 Capture Screen</button>
+    <!-- -------- Timer Button (shows after 10s) -------- -->
+    <button id="timer-btn" onclick="resetTimer()">⏱️ 20s</button>
     <!-- -------- Clear Button -------- -->
     <button id="clear-btn" onclick="clearAll()">✕ Clear</button>
   </div>
@@ -234,6 +253,8 @@
 <script>
   // -------- State --------
   let ws, isListening = false, isManual = false, currentAnswer = '';
+  let timerStartTime = Date.now();  // Track when timeout timer should start
+  let timerInterval = null;  // Keep-alive timer interval
 
   // -------- Connect WebSocket --------
   function connect() {
@@ -242,11 +263,13 @@
     ws.onopen = () => {
       document.getElementById('conn-dot').className = 'on';
       document.getElementById('conn-text').textContent = 'Connected';
+      startTimeoutMonitor();  // Start monitoring timeout after connection
     };
 
     ws.onclose = () => {
       document.getElementById('conn-dot').className = '';
       document.getElementById('conn-text').textContent = 'Reconnecting...';
+      if (timerInterval) clearInterval(timerInterval);
       setTimeout(connect, 2000);
     };
 
@@ -263,6 +286,7 @@
         ab.className = 'active';
         ab.innerHTML = '<span class="cursor"></span>';
         setStatus('⏳ Generating...');
+        timerStartTime = Date.now();  // Reset timer on new question
       }
 
       // -------- Answer Chunk --------
@@ -294,7 +318,45 @@
           applyModeUI(data.manual);
         }
       }
+
+      // -------- Timer reset from other client or STT --------
+      if (data.type === 'timer_reset') {
+        timerStartTime = Date.now();
+        document.getElementById('timer-btn').style.display = 'none';
+      }
     };
+  }
+
+  // -------- Timeout monitoring --------
+  function startTimeoutMonitor() {
+    if (timerInterval) clearInterval(timerInterval);
+    
+    timerInterval = setInterval(() => {
+      const elapsedMs = Date.now() - timerStartTime;
+      const elapsedSecs = Math.floor(elapsedMs / 1000);
+      const timerBtn = document.getElementById('timer-btn');
+      
+      // Show timer after 10 seconds (user can click to reset)
+      if (elapsedSecs >= 10) {
+        timerBtn.style.display = 'block';
+        const remaining = Math.max(0, 20 - elapsedSecs);  // 20 sec total timeout
+        timerBtn.textContent = `⏱️ ${remaining}s`;
+        
+        // Hide when timeout reached
+        if (remaining === 0) {
+          timerBtn.style.display = 'none';
+        }
+      } else {
+        timerBtn.style.display = 'none';
+      }
+    }, 100);  // Update every 100ms for smooth countdown
+  }
+
+  // -------- Reset timer (user clicked timer button) --------
+  function resetTimer() {
+    timerStartTime = Date.now();
+    document.getElementById('timer-btn').style.display = 'none';
+    ws.send(JSON.stringify({ cmd: 'reset_timer' }));
   }
 
   // -------- Mode Toggle --------

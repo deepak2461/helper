@@ -156,7 +156,14 @@ def _run_overlay():
                            bg="#1e293b", fg="#64748b",
                            font=("Segoe UI", 9),
                            padx=10, pady=4, cursor="hand2")
-    capture_lbl.pack(side="left")
+    capture_lbl.pack(side="left", padx=(0, 6))
+
+    # -------- Timeout Timer Button (hidden initially, appears after 10s) --------
+    timeout_timer = tk.Label(action_row, text="⏱️ 20s",
+                             bg="#1e293b", fg="#f59e0b",
+                             font=("Segoe UI", 8, "bold"),
+                             padx=8, pady=4, cursor="hand2")
+    # Timer starts hidden, shown by poll() after 10s
 
     # -------- Clear Button --------
     clear_lbl = tk.Label(action_row, text="✕ Clear",
@@ -217,16 +224,19 @@ def _run_overlay():
     # ================================================================
     tk.Frame(root, bg="#1e1e2e", height=1).pack(fill="x")
 
-    ask_frame = tk.Frame(root, bg="#13131f", pady=6)
-    ask_frame.pack(fill="x", padx=12)
+    ask_frame = tk.Frame(root, bg="#13131f", pady=8, padx=12)
+    # Don't reference `status_lbl` here — it is defined later in the function.
+    ask_frame.pack(fill="x", side="bottom")
 
     ask_entry = tk.Text(ask_frame, height=2,
                         bg="#1e293b", fg="#334155",
                         font=("Segoe UI", 10),
-                        relief="flat", padx=8, pady=5,
+                        relief="solid", bd=1, borderwidth=1, padx=8, pady=6,
                         wrap="word", insertbackground="#818cf8")
-    ask_entry.pack(side="left", fill="x", expand=True)
+    ask_entry.pack(side="left", fill="both", expand=True, padx=(0, 6))
     ask_entry.insert("1.0", "Ask anything...")
+    # Make placeholder visible against dark background
+    ask_entry.config(fg="#64748b")
 
     def ask_focus_in(e):
         if ask_entry.get("1.0", tk.END).strip() == "Ask anything...":
@@ -245,8 +255,15 @@ def _run_overlay():
     send_btn = tk.Label(ask_frame, text="↑",
                         bg="#4f46e5", fg="white",
                         font=("Segoe UI", 13, "bold"),
-                        padx=10, pady=5, cursor="hand2")
-    send_btn.pack(side="right", padx=(6, 0))
+                        padx=10, pady=6, cursor="hand2", 
+                        relief="solid", bd=0) 
+    send_btn.pack(side="right", fill="y")
+    # Ensure input frame and send button are above the answer area
+    try:
+        ask_frame.lift()
+        send_btn.lift()
+    except Exception:
+        pass
 
     # ================================================================
     # STATUS BAR
@@ -256,7 +273,7 @@ def _run_overlay():
                           bg="#0d0d14", fg="#334155",
                           font=("Segoe UI", 8),
                           anchor="w", padx=12)
-    status_lbl.pack(fill="x", pady=3)
+    status_lbl.pack(fill="x", pady=3, side="bottom")
 
     # ================================================================
     # HELPER FUNCTIONS
@@ -281,16 +298,38 @@ def _run_overlay():
     def send_direct(e=None):
         text = ask_entry.get("1.0", tk.END).strip()
         if not text or text == "Ask anything...":
+            status_lbl.config(text="⚠️ Empty question")
             return "break"
+        
+        logger.info(f"[UI] Direct ask: {text}")
         ask_entry.delete("1.0", tk.END)
         ask_entry.config(fg="#334155")
+        ask_entry.insert("1.0", "Ask anything...")
+        
         if socket_server.engine:
+            # Show question in UI
+            current_text[0] = ""
+            question_lbl.config(text=f"❓ {text}")
+            question_frame.pack(fill="x", after=action_row)
+            set_answer_text("", color="#e2e8f0")
+            
             status_lbl.config(text="💬 Asking...")
-            threading.Thread(
-                target=socket_server.engine.generate,
-                args=(text,),
-                daemon=True
-            ).start()
+            send_btn.config(bg="#666666")  # Visual feedback - disable button appearance
+            
+            def process_question():
+                try:
+                    socket_server.engine.generate(text)
+                except Exception as ex:
+                    logger.error(f"[UI] Error sending question: {ex}")
+                    status_lbl.config(text=f"❌ Error: {str(ex)[:50]}")
+                finally:
+                    send_btn.config(bg="#4f46e5")  # Re-enable button
+            
+            threading.Thread(target=process_question, daemon=True).start()
+        else:
+            status_lbl.config(text="❌ Engine not ready")
+            logger.warning("[UI] socket_server.engine not initialized")
+        
         return "break"
 
     def do_capture(e=None):
@@ -348,9 +387,29 @@ def _run_overlay():
     send_btn.bind("<Button-1>", send_direct)
     ask_entry.bind("<Return>", send_direct)
 
+    # -------- Timer button interaction --------
+    def reset_timeout_timer(e=None):
+        """User clicked timer button to reset the timeout countdown"""
+        logger.info("[UI] Timer reset requested")
+        timer_state["start_time"] = time.time()
+        timer_state["shown"] = False
+        timeout_timer.pack_forget()
+        
+        # Notify server to sync reset across all clients
+        from server.socket_server import send_to_clients
+        send_to_clients({"type": "timer_reset"})
+
+    timeout_timer.bind("<Button-1>", reset_timeout_timer)
+    timeout_timer.bind("<Enter>", lambda e: timeout_timer.config(fg="#fbbf24"))
+    timeout_timer.bind("<Leave>", lambda e: timeout_timer.config(fg="#f59e0b"))
+
     # ================================================================
     # QUEUE POLLING — update UI from background threads
     # ================================================================
+    
+    # Timer state tracking
+    timer_state = {"start_time": time.time(), "shown": False}
+
     def poll():
         try:
             while not socket_server.answer_queue.empty():
@@ -381,6 +440,25 @@ def _run_overlay():
 
         except Exception as e:
             logger.error(f"[UI] Poll error: {e}")
+
+        # -------- Timer countdown logic --------
+        # Timer shows after 10 seconds, counts from 20 down to 0
+        elapsed = time.time() - timer_state["start_time"]
+        
+        if elapsed >= 10 and not timer_state["shown"]:  # Show timer after 10s
+            timer_state["shown"] = True
+            timeout_timer.pack(side="left", padx=(0, 6))
+            logger.debug("[UI] Timer button shown")
+        
+        if timer_state["shown"]:
+            remaining = max(0, 20 - int(elapsed))  # 20 sec total timeout
+            timeout_timer.config(text=f"⏱️ {remaining}s")
+            
+            if remaining == 0:
+                # Timeout occurred - user should have clicked to reset
+                logger.warning("[UI] Timeout countdown reached 0")
+                timeout_timer.pack_forget()
+                timer_state["shown"] = False
 
         root.after(100, poll)
 

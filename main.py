@@ -61,9 +61,22 @@ def main():
     socket_server.engine = engine
 
     # -------- Start Mic + STT in Background Thread --------
-    audio_stream = start_mic_stream()
+    # audio_stream = start_mic_stream()
+    # stt_thread = threading.Thread(target=run_stt, args=(stt, audio_stream), daemon=True)
+    # stt_thread.start()
+
+    # -------- Audio mode selection --------  --- IF everything is working fine default it to [2]
+    print("\nAudio capture mode:")
+    print("  [1] Microphone — captures your voice + nearby sounds")
+    print("  [2] Speaker loopback — captures ALL system audio (YouTube, Meet, Teams)")
+    choice = input("\nChoose (1 or 2, default 1): ").strip()
+    audio_mode = "loopback" if choice == "2" else "mic"
+
+    from audio.mic_stream import start_audio_stream
+    audio_stream = start_audio_stream(mode=audio_mode) 
+
     stt_thread = threading.Thread(target=run_stt, args=(stt, audio_stream), daemon=True)
-    stt_thread.start()
+    stt_thread.start()  
 
     # -------- Launch Desktop Overlay (non-blocking) --------
     launch_overlay()
