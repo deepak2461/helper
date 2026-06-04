@@ -19,6 +19,9 @@ import webbrowser
 import time
 from logger import logger
 
+import pystray
+from PIL import Image
+
 # -------- Windows API Constants --------
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 GWL_EXSTYLE            = -20
@@ -82,6 +85,51 @@ def _run_overlay():
         root.withdraw()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # ------------------------------------------------
+    # System Tray
+    # ------------------------------------------------
+
+    def show_window(icon=None, item=None):
+        logger.info("[TRAY] Restoring window")
+
+        root.after(0, root.deiconify)
+        root.after(0, root.lift)
+        root.after(0, lambda: root.attributes("-topmost", True))
+
+    def exit_app(icon=None, item=None):
+        logger.info("[TRAY] Exiting application")
+
+        try:
+            tray_icon.stop()
+        except:
+            pass
+
+        root.after(0, root.destroy)
+
+    # Temporary blue icon
+    tray_image = Image.new("RGB", (64, 64), (51, 70, 242))
+
+    try:
+        tray_icon = pystray.Icon(
+            "helper",
+            tray_image,
+            "Helper",
+            menu=pystray.Menu(
+                pystray.MenuItem("Open", show_window),
+                pystray.MenuItem("Exit", exit_app),
+            ),
+        )
+        tray_icon.visible = True    # Make tray icon open window on double-click
+
+        threading.Thread(
+            target=tray_icon.run,
+            daemon=True
+        ).start()
+        logger.info("[TRAY] Tray started")
+    except Exception as e:
+        logger.exception(f"[TRAY] Tray Failed: {e}")
+
 
     # ================================================================
     # HEADER BAR

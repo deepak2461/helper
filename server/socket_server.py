@@ -11,6 +11,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import uvicorn
 from logger import logger
+from utils.path_utils import resource_path
 
 app = FastAPI()
 
@@ -32,7 +33,10 @@ _event_loop = None
 # -------- Serve UI page --------
 @app.get("/")
 async def get():
-    with open("server/static/index.html", "r", encoding="utf-8") as f:
+    # with open("server/static/index.html", "r", encoding="utf-8") as f:
+    #     return HTMLResponse(f.read())
+    html_file = resource_path("server", "static", "index.html")
+    with open(html_file, "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
@@ -180,8 +184,11 @@ def send_to_clients(message: dict):
 
 # -------- Start server --------
 def start_server():
-    logger.info("[WS] Starting server on port 8000...")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
+    try:
+        logger.info("[WS] Starting server on port 8000...")
+        uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False, log_config=None)  # log_level="error" - changed t0 access_log=False, log_config=None  bcuz -- AttributeError: 'NoneType' object has no attribute 'isatty',When built with:--windowed Windows removes the console. So sys.stdout , sys.stderr becomes none , Uvicorn's default logging formatter tries to do: sys.stderr.isatty() and crashes.
+    except Exception as e:
+        logger.exception(f"[WS] Server crashed: {e}")
 
 
 def start_server_thread():

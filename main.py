@@ -15,6 +15,7 @@ from utils.context_loader import load_context
 from llm.answer_engine import AnswerEngine
 from server.socket_server import start_server_thread
 from ui.overlay import launch_overlay
+from utils.path_utils import user_path
 
 
 # -------- Get Local IP for Phone Access --------
@@ -47,7 +48,12 @@ def main():
     print(f"{'='*45}\n")
 
     # -------- Load Resume + JD --------
-    context = load_context(resume_path="docs/resume.pdf", jd_path="docs/jd.pdf")
+    #context = load_context(resume_path="docs/resume.pdf", jd_path="docs/jd.pdf")
+    # changed above line to below for making it work in EXE where we need to use user_path to access files beside the EXE
+    docs_dir = user_path("docs")
+    logger.info(f"[DOCS] Using docs directory: {docs_dir}")
+    os.makedirs(docs_dir, exist_ok=True)
+    context = load_context(resume_path=os.path.join(docs_dir, "resume.pdf"),jd_path=os.path.join(docs_dir, "jd.pdf"))
 
     # -------- Init LLM Engine --------
     engine = AnswerEngine(resume=context["resume"], jd=context["jd"])
