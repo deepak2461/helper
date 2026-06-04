@@ -6,6 +6,7 @@
 import socket
 import time
 import threading
+import os
 from dotenv import load_dotenv
 from logger import logger
 from audio.mic_stream import start_mic_stream
@@ -65,12 +66,13 @@ def main():
     # stt_thread = threading.Thread(target=run_stt, args=(stt, audio_stream), daemon=True)
     # stt_thread.start()
 
-    # -------- Audio mode selection --------  --- IF everything is working fine default it to [2]
-    print("\nAudio capture mode:")
-    print("  [1] Microphone — captures your voice + nearby sounds")
-    print("  [2] Speaker loopback — captures ALL system audio (YouTube, Meet, Teams)")
-    choice = input("\nChoose (1 or 2, default 1): ").strip()
-    audio_mode = "loopback" if choice == "2" else "mic"
+    # -------- Audio mode selection --------
+    # Use AUDIO_MODE=mic or AUDIO_MODE=loopback in .env. Default keeps the previous behavior.
+    audio_mode = os.getenv("AUDIO_MODE", "loopback").strip().lower()
+    if audio_mode not in ("mic", "loopback"):
+        logger.warning(f"[MAIN] Invalid AUDIO_MODE '{audio_mode}', falling back to loopback")
+        audio_mode = "loopback"
+    logger.info(f"[MAIN] Audio mode: {audio_mode}")
 
     from audio.mic_stream import start_audio_stream
     audio_stream = start_audio_stream(mode=audio_mode) 

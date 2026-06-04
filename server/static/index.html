@@ -31,7 +31,7 @@
 
     .logo { font-size: 13px; font-weight: 700; color: #818cf8; }
 
-    #conn-status { font-size: 11px; color: #334155; display: flex; align-items: center; gap: 5px; }
+    #conn-status { font-size: 11px; color: #334155; display: flex; align-items: center; gap: 6px; }
     #conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
     #conn-dot.on { background: #4ade80; }
 
@@ -93,12 +93,12 @@
     
     /* -------- Timer Button (shows after 10s) -------- */
     #timer-btn {
-      padding: 7px 10px; border: none; border-radius: 7px;
-      background: #1e293b; color: #f59e0b;
+      padding: 2px 4px; border: none; border-radius: 4px;
+      background: transparent; color: #818cf8;
       font-size: 11px; font-weight: 600; cursor: pointer; transition: 0.15s;
       display: none;
     }
-    #timer-btn:hover { background: #273548; color: #fbbf24; }
+    #timer-btn:hover { color: #a5b4fc; }
     
     /* -------- Clear Button -------- */
     #clear-btn {
@@ -198,6 +198,7 @@
   <div id="header">
     <span class="logo">⚡ Helper</span>
     <div id="conn-status">
+      <button id="timer-btn" onclick="resetTimer()">⏱️ 10s</button>
       <span id="conn-dot"></span>
       <span id="conn-text">Connecting...</span>
     </div>
@@ -222,8 +223,6 @@
     <button id="mic-btn" onclick="toggleMic()">🎙️ Start Listening</button>
     <!-- -------- Screen Capture Button -------- -->
     <button id="capture-btn" onclick="captureScreen()">📸 Capture Screen</button>
-    <!-- -------- Timer Button (shows after 10s) -------- -->
-    <button id="timer-btn" onclick="resetTimer()">⏱️ 20s</button>
     <!-- -------- Clear Button -------- -->
     <button id="clear-btn" onclick="clearAll()">✕ Clear</button>
   </div>
@@ -253,8 +252,13 @@
 <script>
   // -------- State --------
   let ws, isListening = false, isManual = false, currentAnswer = '';
+  const IDLE_WARNING_AFTER = 10;
+  const IDLE_WARNING_SECONDS = 10;
   let timerStartTime = Date.now();  // Track when timeout timer should start
-  let timerInterval = null;  // Keep-alive timer interval
+  let timerExpired = false;
+  let sttConnected = true;
+  let sttReconnecting = false;
+  let timerInterval = null;  // Idle warning timer interval
 
   // -------- Connect WebSocket --------
   function connect() {
@@ -286,7 +290,7 @@
         ab.className = 'active';
         ab.innerHTML = '<span class="cursor"></span>';
         setStatus('⏳ Generating...');
-        timerStartTime = Date.now();  // Reset timer on new question
+        resetLocalTimer();  // Reset timer on new question
       }
 
       // -------- Answer Chunk --------
@@ -304,11 +308,46 @@
         document.getElementById('answer-box').innerHTML = currentAnswer;
         document.getElementById('answer-box').className = '';
         document.getElementById('ask-btn').disabled = false;
+        resetLocalTimer();
         setStatus('✅ Ready');
       }
 
       // -------- Status --------
-      if (data.type === 'status') { setStatus(data.text); }
+      if (data.type === 'status') {
+        if (data.text.includes('Listening') || data.text.includes('Processing')) {
+          resetLocalTimer();
+        }
+        setStatus(data.text);
+      }
+
+      // -------- Any recognized speech hides/restarts the idle warning --------
+      if (data.type === 'speech_activity') {
+        resetLocalTimer();
+      }
+
+      // -------- STT connection state --------
+      if (data.type === 'stt_disconnected') {
+        sttConnected = false;
+        sttReconnecting = false;
+        document.getElementById('conn-dot').className = '';
+        setStatus('Deepgram disconnected');
+        showReconnectButton();
+      }
+
+      if (data.type === 'stt_reconnecting') {
+        sttConnected = false;
+        sttReconnecting = true;
+        setStatus('Reconnecting Deepgram...');
+        showReconnectButton();
+      }
+
+      if (data.type === 'stt_connected') {
+        sttConnected = true;
+        sttReconnecting = false;
+        document.getElementById('conn-dot').className = 'on';
+        setStatus('Deepgram connected');
+        resetLocalTimer();
+      }
 
       // -------- Mode sync from tkinter --------
       if (data.type === 'mode_change') {
@@ -321,8 +360,7 @@
 
       // -------- Timer reset from other client or STT --------
       if (data.type === 'timer_reset') {
-        timerStartTime = Date.now();
-        document.getElementById('timer-btn').style.display = 'none';
+        resetLocalTimer();
       }
     };
   }
@@ -335,18 +373,24 @@
       const elapsedMs = Date.now() - timerStartTime;
       const elapsedSecs = Math.floor(elapsedMs / 1000);
       const timerBtn = document.getElementById('timer-btn');
+
+      if (!sttConnected) {
+        showReconnectButton();
+        return;
+      }
       
-      // Show timer after 10 seconds (user can click to reset)
-      if (elapsedSecs >= 10) {
+      // Hidden for 10s of inactivity, then show a 10s warning countdown.
+      if (!timerExpired && elapsedSecs >= IDLE_WARNING_AFTER) {
         timerBtn.style.display = 'block';
-        const remaining = Math.max(0, 20 - elapsedSecs);  // 20 sec total timeout
+        const remaining = Math.max(0, IDLE_WARNING_SECONDS - (elapsedSecs - IDLE_WARNING_AFTER));
         timerBtn.textContent = `⏱️ ${remaining}s`;
         
         // Hide when timeout reached
         if (remaining === 0) {
           timerBtn.style.display = 'none';
+          timerExpired = true;
         }
-      } else {
+      } else if (!timerExpired) {
         timerBtn.style.display = 'none';
       }
     }, 100);  // Update every 100ms for smooth countdown
@@ -354,9 +398,29 @@
 
   // -------- Reset timer (user clicked timer button) --------
   function resetTimer() {
-    timerStartTime = Date.now();
-    document.getElementById('timer-btn').style.display = 'none';
+    if (!sttConnected) {
+      sttReconnecting = true;
+      showReconnectButton();
+      setStatus('Reconnecting Deepgram...');
+      ws.send(JSON.stringify({ cmd: 'reconnect_stt' }));
+      return;
+    }
+
+    resetLocalTimer();
     ws.send(JSON.stringify({ cmd: 'reset_timer' }));
+  }
+
+  function resetLocalTimer() {
+    if (!sttConnected) return;
+    timerStartTime = Date.now();
+    timerExpired = false;
+    document.getElementById('timer-btn').style.display = 'none';
+  }
+
+  function showReconnectButton() {
+    const timerBtn = document.getElementById('timer-btn');
+    timerBtn.textContent = '🔄';
+    timerBtn.style.display = 'block';
   }
 
   // -------- Mode Toggle --------

@@ -91,8 +91,14 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # -------- Timer reset (user clicked timer button to extend timeout) --------
             elif cmd == "reset_timer":
-                # UI will handle resetting its timer, server just broadcasts to sync all clients
+                if stt:
+                    stt.extend_timeout()
                 await broadcast({"type": "timer_reset"})
+
+            # -------- STT reconnect after Deepgram timeout --------
+            elif cmd == "reconnect_stt":
+                if stt:
+                    stt.reconnect()
 
     except WebSocketDisconnect:
         if websocket in connected_clients:
@@ -122,6 +128,14 @@ async def broadcast(message: dict):
         answer_queue.put(("status", message.get("text", "")))
     elif msg_type == "mode_change":
         answer_queue.put(("mode", message.get("manual", False)))
+    elif msg_type in (
+        "speech_activity",
+        "timer_reset",
+        "stt_connected",
+        "stt_disconnected",
+        "stt_reconnecting",
+    ):
+        answer_queue.put((msg_type, ""))
 
     # -------- Send to all WebSocket clients --------
     disconnected = []
@@ -152,6 +166,14 @@ def send_to_clients(message: dict):
                 answer_queue.put(("done", ""))
             elif msg_type == "status":
                 answer_queue.put(("status", message.get("text", "")))
+            elif msg_type in (
+                "speech_activity",
+                "timer_reset",
+                "stt_connected",
+                "stt_disconnected",
+                "stt_reconnecting",
+            ):
+                answer_queue.put((msg_type, ""))
     except Exception as e:
         logger.error(f"[WS] send_to_clients error: {e}")
 

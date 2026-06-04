@@ -24,6 +24,9 @@ WDA_EXCLUDEFROMCAPTURE = 0x00000011
 GWL_EXSTYLE            = -20
 WS_EX_TOOLWINDOW       = 0x00000080
 WS_EX_APPWINDOW        = 0x00040000
+ACCENT_COLOR           = "#818cf8"
+IDLE_WARNING_AFTER     = 10
+IDLE_WARNING_SECONDS   = 10
 
 
 # -------- Get correct HWND --------
@@ -91,7 +94,7 @@ def _run_overlay():
     inner_header.pack(fill="x", padx=12)
 
     tk.Label(inner_header, text="⚡ Helper",
-             bg="#13131f", fg="#818cf8",
+             bg="#13131f", fg=ACCENT_COLOR,
              font=("Segoe UI", 12, "bold")).pack(side="left")
 
     # -------- Globe icon — open browser (no button look) --------
@@ -100,7 +103,7 @@ def _run_overlay():
                      font=("Segoe UI", 12), cursor="hand2")
     globe.pack(side="right")
     globe.bind("<Button-1>", lambda e: webbrowser.open("http://localhost:8000"))
-    globe.bind("<Enter>", lambda e: globe.config(fg="#818cf8"))
+    globe.bind("<Enter>", lambda e: globe.config(fg=ACCENT_COLOR))
     globe.bind("<Leave>", lambda e: globe.config(fg="#334155"))
 
     # Status dot
@@ -158,12 +161,12 @@ def _run_overlay():
                            padx=10, pady=4, cursor="hand2")
     capture_lbl.pack(side="left", padx=(0, 6))
 
-    # -------- Timeout Timer Button (hidden initially, appears after 10s) --------
-    timeout_timer = tk.Label(action_row, text="⏱️ 20s",
-                             bg="#1e293b", fg="#f59e0b",
+    # -------- Timeout Timer Button (hidden initially, appears in header after idle warning) --------
+    timeout_timer = tk.Label(inner_header, text="⏱️ 10s",
+                             bg="#13131f", fg=ACCENT_COLOR,
                              font=("Segoe UI", 8, "bold"),
-                             padx=8, pady=4, cursor="hand2")
-    # Timer starts hidden, shown by poll() after 10s
+                             padx=6, pady=1, cursor="hand2")
+    # Timer starts hidden, shown by poll() after idle warning threshold
 
     # -------- Clear Button --------
     clear_lbl = tk.Label(action_row, text="✕ Clear",
@@ -181,7 +184,7 @@ def _run_overlay():
     # packed only when question arrives
 
     question_lbl = tk.Label(question_frame, text="",
-                            bg="#13131f", fg="#818cf8",
+                            bg="#13131f", fg=ACCENT_COLOR,
                             font=("Segoe UI", 9, "italic"),
                             wraplength=340, justify="left",
                             anchor="w", padx=12, pady=5)
@@ -210,7 +213,7 @@ def _run_overlay():
                           state="disabled", cursor="arrow",
                           selectbackground="#1e293b",
                           yscrollcommand=scrollbar.set,
-                          insertbackground="#818cf8")
+                          insertbackground=ACCENT_COLOR)
     answer_text.pack(side="left", fill="both", expand=True)
     scrollbar.config(command=answer_text.yview)
 
@@ -226,30 +229,43 @@ def _run_overlay():
 
     ask_frame = tk.Frame(root, bg="#13131f", pady=8, padx=12)
     # Don't reference `status_lbl` here — it is defined later in the function.
-    ask_frame.pack(fill="x", side="bottom")
+    ask_frame.pack(fill="x", after=action_row)
 
     ask_entry = tk.Text(ask_frame, height=2,
                         bg="#1e293b", fg="#334155",
                         font=("Segoe UI", 10),
                         relief="solid", bd=1, borderwidth=1, padx=8, pady=6,
-                        wrap="word", insertbackground="#818cf8")
+                        wrap="word", insertbackground=ACCENT_COLOR)
     ask_entry.pack(side="left", fill="both", expand=True, padx=(0, 6))
-    ask_entry.insert("1.0", "Ask anything...")
-    # Make placeholder visible against dark background
-    ask_entry.config(fg="#64748b")
+    ask_placeholder = ["Ask anything...", True]
 
-    def ask_focus_in(e):
-        if ask_entry.get("1.0", tk.END).strip() == "Ask anything...":
+    def set_ask_placeholder():
+        ask_placeholder[1] = True
+        ask_entry.delete("1.0", tk.END)
+        ask_entry.insert("1.0", ask_placeholder[0])
+        ask_entry.config(fg="#64748b")
+
+    def clear_ask_placeholder():
+        if ask_placeholder[1]:
+            ask_placeholder[1] = False
             ask_entry.delete("1.0", tk.END)
             ask_entry.config(fg="#e2e8f0")
 
+    set_ask_placeholder()
+
+    def ask_focus_in(e):
+        clear_ask_placeholder()
+
     def ask_focus_out(e):
         if not ask_entry.get("1.0", tk.END).strip():
-            ask_entry.insert("1.0", "Ask anything...")
-            ask_entry.config(fg="#334155")
+            set_ask_placeholder()
+
+    def ask_key_press(e):
+        clear_ask_placeholder()
 
     ask_entry.bind("<FocusIn>", ask_focus_in)
     ask_entry.bind("<FocusOut>", ask_focus_out)
+    ask_entry.bind("<KeyPress>", ask_key_press, add="+")
 
     # -------- Send button --------
     send_btn = tk.Label(ask_frame, text="↑",
@@ -296,21 +312,24 @@ def _run_overlay():
         status_lbl.config(text="Ready")
 
     def send_direct(e=None):
+        clear_ask_placeholder()
         text = ask_entry.get("1.0", tk.END).strip()
-        if not text or text == "Ask anything...":
+        if text.startswith(ask_placeholder[0]):
+            text = text[len(ask_placeholder[0]):].strip()
+
+        if not text:
             status_lbl.config(text="⚠️ Empty question")
+            set_ask_placeholder()
             return "break"
         
         logger.info(f"[UI] Direct ask: {text}")
-        ask_entry.delete("1.0", tk.END)
-        ask_entry.config(fg="#334155")
-        ask_entry.insert("1.0", "Ask anything...")
+        set_ask_placeholder()
         
         if socket_server.engine:
             # Show question in UI
             current_text[0] = ""
             question_lbl.config(text=f"❓ {text}")
-            question_frame.pack(fill="x", after=action_row)
+            question_frame.pack(fill="x", after=ask_frame)
             set_answer_text("", color="#e2e8f0")
             
             status_lbl.config(text="💬 Asking...")
@@ -388,27 +407,59 @@ def _run_overlay():
     ask_entry.bind("<Return>", send_direct)
 
     # -------- Timer button interaction --------
-    def reset_timeout_timer(e=None):
-        """User clicked timer button to reset the timeout countdown"""
-        logger.info("[UI] Timer reset requested")
+    def show_reconnect_button():
+        timer_state["shown"] = True
+        timer_state["expired"] = True
+        timeout_timer.config(text="🔄", fg=ACCENT_COLOR, cursor="hand2")
+        if not timeout_timer.winfo_ismapped():
+            timeout_timer.pack(side="right", padx=(0, 8), before=status_dot)
+
+    def reset_idle_timer(show_sync=True):
+        if not timer_state["connected"]:
+            return
+
         timer_state["start_time"] = time.time()
         timer_state["shown"] = False
+        timer_state["expired"] = False
         timeout_timer.pack_forget()
-        
-        # Notify server to sync reset across all clients
-        from server.socket_server import send_to_clients
-        send_to_clients({"type": "timer_reset"})
+
+        if show_sync:
+            # Notify server to sync reset across all clients
+            from server.socket_server import send_to_clients
+            send_to_clients({"type": "timer_reset"})
+
+    def reset_timeout_timer(e=None):
+        """User clicked the header timer/reconnect control."""
+        if not timer_state["connected"]:
+            logger.info("[UI] STT reconnect requested")
+            timer_state["reconnecting"] = True
+            timeout_timer.config(text="🔄")
+            status_lbl.config(text="Reconnecting Deepgram...")
+            if socket_server.stt:
+                socket_server.stt.reconnect()
+            return
+
+        logger.info("[UI] Timer reset requested")
+        if socket_server.stt:
+            socket_server.stt.extend_timeout()
+        reset_idle_timer(show_sync=True)
 
     timeout_timer.bind("<Button-1>", reset_timeout_timer)
-    timeout_timer.bind("<Enter>", lambda e: timeout_timer.config(fg="#fbbf24"))
-    timeout_timer.bind("<Leave>", lambda e: timeout_timer.config(fg="#f59e0b"))
+    timeout_timer.bind("<Enter>", lambda e: timeout_timer.config(fg="#a5b4fc"))
+    timeout_timer.bind("<Leave>", lambda e: timeout_timer.config(fg=ACCENT_COLOR))
 
     # ================================================================
     # QUEUE POLLING — update UI from background threads
     # ================================================================
     
     # Timer state tracking
-    timer_state = {"start_time": time.time(), "shown": False}
+    timer_state = {
+        "start_time": time.time(),
+        "shown": False,
+        "expired": False,
+        "connected": True,
+        "reconnecting": False,
+    }
 
     def poll():
         try:
@@ -416,9 +467,10 @@ def _run_overlay():
                 msg_type, text = socket_server.answer_queue.get_nowait()
 
                 if msg_type == "question":
+                    reset_idle_timer(show_sync=False)
                     current_text[0] = ""
                     question_lbl.config(text=f"❓ {text}")
-                    question_frame.pack(fill="x", after=action_row)
+                    question_frame.pack(fill="x", after=ask_frame)
                     set_answer_text("", color="#e2e8f0")
                     status_lbl.config(text="⏳ Generating...")
 
@@ -427,10 +479,37 @@ def _run_overlay():
                     set_answer_text(current_text[0])
 
                 elif msg_type == "done":
+                    reset_idle_timer(show_sync=False)
                     status_lbl.config(text="✅ Ready")
 
                 elif msg_type == "status":
+                    if "Listening" in text or "Processing" in text:
+                        reset_idle_timer(show_sync=False)
                     status_lbl.config(text=text)
+
+                elif msg_type in ("speech_activity", "timer_reset"):
+                    reset_idle_timer(show_sync=False)
+
+                elif msg_type == "stt_disconnected":
+                    timer_state["connected"] = False
+                    timer_state["reconnecting"] = False
+                    status_dot.config(fg="#ef4444")
+                    status_lbl.config(text="Deepgram disconnected")
+                    show_reconnect_button()
+
+                elif msg_type == "stt_reconnecting":
+                    timer_state["connected"] = False
+                    timer_state["reconnecting"] = True
+                    status_dot.config(fg="#f59e0b")
+                    status_lbl.config(text="Reconnecting Deepgram...")
+                    show_reconnect_button()
+
+                elif msg_type == "stt_connected":
+                    timer_state["connected"] = True
+                    timer_state["reconnecting"] = False
+                    status_dot.config(fg="#4ade80")
+                    status_lbl.config(text="Deepgram connected")
+                    reset_idle_timer(show_sync=False)
 
                 elif msg_type == "mode":
                     # Web UI changed mode — sync tkinter toggle
@@ -442,23 +521,31 @@ def _run_overlay():
             logger.error(f"[UI] Poll error: {e}")
 
         # -------- Timer countdown logic --------
-        # Timer shows after 10 seconds, counts from 20 down to 0
+        # Hidden for 10s of inactivity, then shows a 10s warning countdown.
+        if not timer_state["connected"]:
+            root.after(100, poll)
+            return
+
         elapsed = time.time() - timer_state["start_time"]
         
-        if elapsed >= 10 and not timer_state["shown"]:  # Show timer after 10s
+        if (not timer_state["expired"]
+                and elapsed >= IDLE_WARNING_AFTER
+                and not timer_state["shown"]):
             timer_state["shown"] = True
-            timeout_timer.pack(side="left", padx=(0, 6))
+            timeout_timer.pack(side="right", padx=(0, 8), before=status_dot)
             logger.debug("[UI] Timer button shown")
         
-        if timer_state["shown"]:
-            remaining = max(0, 20 - int(elapsed))  # 20 sec total timeout
+        if timer_state["shown"] and not timer_state["expired"]:
+            warning_elapsed = int(elapsed - IDLE_WARNING_AFTER)
+            remaining = max(0, IDLE_WARNING_SECONDS - warning_elapsed)
             timeout_timer.config(text=f"⏱️ {remaining}s")
             
             if remaining == 0:
-                # Timeout occurred - user should have clicked to reset
+                # Timeout occurred - leave underlying Deepgram/app behavior alone.
                 logger.warning("[UI] Timeout countdown reached 0")
                 timeout_timer.pack_forget()
                 timer_state["shown"] = False
+                timer_state["expired"] = True
 
         root.after(100, poll)
 

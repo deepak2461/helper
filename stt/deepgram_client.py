@@ -32,7 +32,9 @@ class DeepgramSTT:
         
         # -------- Keep-alive tracking --------
         self.last_audio_time = None
-        self.keep_alive_interval = 8  # Send keep-alive every 8 secs to prevent 10sec timeout
+        self.connection = None
+        self.connection_lock = threading.Lock()
+        self.reconnect_event = threading.Event()
 
     # -------- Set mode (called from UI) --------
     def set_mode(self, manual: bool):
@@ -67,6 +69,10 @@ class DeepgramSTT:
 
     # -------- Process a final transcript --------
     def handle_transcript(self, transcript: str):
+        from server.socket_server import send_to_clients
+
+        send_to_clients({"type": "speech_activity"})
+
         with self.mode_lock:
             is_manual = self.manual_mode
             is_listening = self.manual_listening
@@ -98,16 +104,64 @@ class DeepgramSTT:
         from server.socket_server import send_to_clients
         send_to_clients({"type": "timeout_warning", "remaining": remaining_secs})
 
+    def extend_timeout(self):
+        """User-triggered keep-alive from the UI timer button."""
+        with self.connection_lock:
+            connection = self.connection
+
+        if not connection:
+            logger.warning("[STT] Timer reset requested but Deepgram is not connected")
+            return
+
+        try:
+            silent_frame = b'\x00' * 3200  # ~100ms of silence at 16kHz
+            connection.send(silent_frame)
+            self.last_audio_time = time.time()
+            logger.info("[STT] Timer reset keep-alive sent")
+        except Exception as e:
+            logger.error(f"[STT] Timer reset keep-alive failed: {e}")
+
+    def reconnect(self):
+        """Reconnect after Deepgram has timed out or disconnected."""
+        with self.connection_lock:
+            is_connected = self.connection is not None
+
+        if is_connected:
+            logger.info("[STT] Reconnect requested while already connected")
+            return
+
+        logger.info("[STT] Reconnect requested")
+        self.reconnect_event.set()
+        self._notify_ui({"type": "stt_reconnecting"})
+
+    def _notify_ui(self, message: dict):
+        from server.socket_server import send_to_clients
+
+        send_to_clients(message)
+
     # -------- Main STT run loop --------
     def run(self, audio_generator):
+        while True:
+            self._run_connection(audio_generator)
+            logger.warning("[STT] Deepgram disconnected; waiting for reconnect request")
+            self._notify_ui({"type": "stt_disconnected"})
+            self.reconnect_event.clear()
+            self.reconnect_event.wait()
+            self._notify_ui({"type": "stt_reconnecting"})
+
+    def _run_connection(self, audio_generator):
         logger.info("[STT] Connecting to Deepgram...")
 
         connection = self.deepgram.listen.websocket.v("1")
+        connection_closed = threading.Event()
+        with self.connection_lock:
+            self.connection = connection
 
         # -------- Event: Connection opened --------
         def on_open(self_inner, open_obj, **kwargs):
             logger.info("[STT] Deepgram connection opened")
             self.last_audio_time = time.time()
+            self._notify_ui({"type": "stt_connected"})
 
         # -------- Event: Transcript received --------
         def on_message(self_inner, result, **kwargs):
@@ -130,10 +184,12 @@ class DeepgramSTT:
         # -------- Event: Connection closed --------
         def on_close(self_inner, close_obj, **kwargs):
             logger.warning("[STT] Deepgram connection closed")
+            connection_closed.set()
 
         # -------- Event: Error --------
         def on_error(self_inner, error, **kwargs):
             logger.error(f"[STT] Deepgram error: {error}")
+            connection_closed.set()
 
         connection.on(LiveTranscriptionEvents.Open, on_open)
         connection.on(LiveTranscriptionEvents.Transcript, on_message)
@@ -155,33 +211,19 @@ class DeepgramSTT:
 
         if not connection.start(options):
             logger.error("[STT] Failed to start Deepgram connection")
+            with self.connection_lock:
+                if self.connection is connection:
+                    self.connection = None
             return
 
         logger.info("[STT] Deepgram started. Listening...")
         self.last_audio_time = time.time()
 
-        # -------- Keep-alive thread to prevent 20 second timeout --------
-        def keep_alive_thread():
-            """Send silent audio frames every 8 seconds to keep connection alive"""
-            while True:
-                try:
-                    if self.last_audio_time and time.time() - self.last_audio_time > self.keep_alive_interval:
-                        # Send silent audio frame to keep connection alive
-                        silent_frame = b'\x00' * 3200  # ~100ms of silence at 16kHz
-                        connection.send(silent_frame)
-                        logger.debug("[STT] Keep-alive ping sent")
-                        self.last_audio_time = time.time()
-                    time.sleep(1)
-                except Exception as e:
-                    logger.debug(f"[STT] Keep-alive thread error (connection may be closing): {e}")
-                    break
-
-        keepalive_thread = threading.Thread(target=keep_alive_thread, daemon=True)
-        keepalive_thread.start()
-
         # -------- Audio stream loop --------
         try:
             for chunk in audio_generator:
+                if connection_closed.is_set():
+                    break
                 self.last_audio_time = time.time()
                 connection.send(chunk)
         except KeyboardInterrupt:
@@ -190,4 +232,7 @@ class DeepgramSTT:
             logger.error(f"[STT] Stream error: {e}")
         finally:
             connection.finish()
+            with self.connection_lock:
+                if self.connection is connection:
+                    self.connection = None
             logger.info("[STT] Deepgram finished")
