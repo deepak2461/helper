@@ -3,7 +3,11 @@ import sys
 import os
 from datetime import datetime
 
+
+CURRENT_LOG_FILE = None
+    
 def setup_logger():
+    global CURRENT_LOG_FILE
     logger = logging.getLogger("helper")
     logger.setLevel(logging.DEBUG)
 
@@ -22,6 +26,7 @@ def setup_logger():
     # File name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"run_{timestamp}.log")
+    CURRENT_LOG_FILE = log_file
 
     # File handler
     file_handler = logging.FileHandler(log_file)

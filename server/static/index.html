@@ -227,14 +227,6 @@
     <button id="clear-btn" onclick="clearAll()">✕ Clear</button>
   </div>
 
-  <!-- -------- Scrollable Content -------- -->
-  <div id="content">
-    <!-- -------- Question Display -------- -->
-    <div id="question-box"></div>
-    <!-- -------- Answer Display -------- -->
-    <div id="answer-box">Waiting for question...</div>
-  </div>
-
   <!-- -------- Direct Ask Input Box -------- -->
   <div id="ask-section">
     <textarea
@@ -245,6 +237,25 @@
     ></textarea>
     <button id="ask-btn" onclick="sendDirectQuestion()">Ask ↑</button>
   </div>
+
+  <!-- -------- Scrollable Content -------- -->
+  <div id="content">
+    <!-- -------- Question Display -------- -->
+    <div id="question-box"></div>
+    <!-- -------- Answer Display -------- -->
+    <div id="answer-box">Waiting for question...</div>
+  </div>
+
+  <!-- -------- Direct Ask Input Box --------
+  <div id="ask-section">
+    <textarea
+      id="ask-input"
+      placeholder="Ask anything directly..."
+      rows="1"
+      onkeydown="handleAskKey(event)"
+    ></textarea>
+    <button id="ask-btn" onclick="sendDirectQuestion()">Ask ↑</button>
+  </div> -->
 
   <!-- -------- Status Bar -------- -->
   <div id="status-bar">Ready</div>

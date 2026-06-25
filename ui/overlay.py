@@ -66,7 +66,7 @@ def _run_overlay():
 
     root = tk.Tk()
     root.title("HELPER")                          # no title text
-    root.geometry("380x600")
+    root.geometry("380x600")            # 380x600
     root.configure(bg="#0d0d14")
     root.attributes("-topmost", True)
     root.attributes("-alpha", 0.96)         # opacity — change here
@@ -107,7 +107,7 @@ def _run_overlay():
 
         root.after(0, root.destroy)
 
-    # Temporary blue icon
+    # Temporary blue icon  # currently not working , look into this later -- not high priority
     tray_image = Image.new("RGB", (64, 64), (51, 70, 242))
 
     try:

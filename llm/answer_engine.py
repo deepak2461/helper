@@ -86,6 +86,7 @@ class AnswerEngine:
             # -------- Notify UI: answer complete --------
             send_to_clients({"type": "answer_done", "text": ""})
             logger.info(f"[LLM] Answer complete ({len(full_answer)} chars)")
+            logger.info(f"[LLM] Full answer: {full_answer}")  
             return full_answer
 
         except Exception as e:

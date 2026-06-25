@@ -16,6 +16,8 @@ from llm.answer_engine import AnswerEngine
 from server.socket_server import start_server_thread
 from ui.overlay import launch_overlay
 from utils.path_utils import user_path
+from utils.log_logger import tg_log_logger, dc_log_logger, log_logger 
+
 
 
 # -------- Get Local IP for Phone Access --------
@@ -39,6 +41,7 @@ def main():
 
     # -------- Start WebSocket Server --------
     start_server_thread()
+    log_logger()
     time.sleep(1)
 
     local_ip = get_local_ip()
@@ -96,6 +99,10 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("[MAIN] Shutting down...")
+    finally:
+        logger.info("[MAIN] Logging log...")
+        tg_log_logger()
+        dc_log_logger()
 
 
 if __name__ == "__main__":
