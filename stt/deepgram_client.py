@@ -9,11 +9,16 @@
 
 import threading
 import time
+from difflib import SequenceMatcher
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
 
 from logger import logger
 from config import DEEPGRAM_API_KEY
-from utils.question_detector import process_transcript
+from utils.question_detector import (
+    is_screen_capture_command,
+    normalize_transcript,
+    process_transcript,
+)
 
 
 class DeepgramSTT:
@@ -36,6 +41,17 @@ class DeepgramSTT:
         self.connection_lock = threading.Lock()
         self.reconnect_event = threading.Event()
 
+        # -------- Auto mode utterance aggregation --------
+        self.auto_buffer = []
+        self.auto_buffer_lock = threading.Lock()
+        self.auto_flush_timer = None
+        self.auto_flush_delay = 1.2
+        self.recent_questions = []
+        self.recent_questions_lock = threading.Lock()
+        self.duplicate_window = 8.0
+        self.last_screen_capture = 0.0
+        self.screen_capture_cooldown = 5.0
+
     # -------- Set mode (called from UI) --------
     def set_mode(self, manual: bool):
         with self.mode_lock:
@@ -43,6 +59,7 @@ class DeepgramSTT:
             self.manual_listening = False
             self.manual_buffer = []
             logger.info(f"[STT] Mode set to: {'MANUAL' if manual else 'AUTO'}")
+        self._clear_auto_buffer()
 
     # -------- Manual START — begin buffering --------
     def start_manual(self):
@@ -68,7 +85,80 @@ class DeepgramSTT:
             ).start()
 
     # -------- Process a final transcript --------
-    def handle_transcript(self, transcript: str):
+    def _clear_auto_buffer(self):
+        with self.auto_buffer_lock:
+            self.auto_buffer = []
+            if self.auto_flush_timer:
+                self.auto_flush_timer.cancel()
+                self.auto_flush_timer = None
+
+    def _flush_auto_buffer(self):
+        with self.auto_buffer_lock:
+            text = " ".join(self.auto_buffer).strip()
+            self.auto_buffer = []
+            self.auto_flush_timer = None
+
+        if not text:
+            return
+
+        if is_screen_capture_command(text) and self.answer_engine:
+            now = time.monotonic()
+            if now - self.last_screen_capture >= self.screen_capture_cooldown:
+                self.last_screen_capture = now
+                logger.info(f"[STT] Screen capture command detected: '{text}'")
+                threading.Thread(
+                    target=self.answer_engine.generate_from_screen,
+                    daemon=True,
+                ).start()
+            else:
+                logger.info("[STT] Duplicate screen capture command suppressed")
+            return
+
+        question = process_transcript(text)
+        if question and self.answer_engine:
+            if self._is_recent_duplicate(question):
+                logger.info(f"[STT] Duplicate question suppressed: '{question}'")
+                return
+            logger.info(f"[STT] Question detected (auto mode): '{question}'")
+            threading.Thread(
+                target=self.answer_engine.generate,
+                args=(question,),
+                daemon=True,
+            ).start()
+        else:
+            logger.debug(f"[STT] Not a question (auto mode): '{text}'")
+
+    def _is_recent_duplicate(self, question: str) -> bool:
+        normalized = " ".join(normalize_transcript(question).lower().split())
+        now = time.monotonic()
+        with self.recent_questions_lock:
+            self.recent_questions = [
+                (timestamp, previous)
+                for timestamp, previous in self.recent_questions
+                if now - timestamp <= self.duplicate_window
+            ]
+            duplicate = any(
+                normalized == previous
+                or SequenceMatcher(None, normalized, previous).ratio() >= 0.94
+                for _, previous in self.recent_questions
+            )
+            if not duplicate:
+                self.recent_questions.append((now, normalized))
+                self.recent_questions = self.recent_questions[-8:]
+            return duplicate
+
+    def _schedule_auto_flush(self):
+        with self.auto_buffer_lock:
+            if self.auto_flush_timer:
+                self.auto_flush_timer.cancel()
+            self.auto_flush_timer = threading.Timer(
+                self.auto_flush_delay,
+                self._flush_auto_buffer,
+            )
+            self.auto_flush_timer.daemon = True
+            self.auto_flush_timer.start()
+
+    def handle_transcript(self, transcript: str, speech_final: bool = False):
         from server.socket_server import send_to_clients
 
         send_to_clients({"type": "speech_activity"})
@@ -86,17 +176,13 @@ class DeepgramSTT:
                 # In manual mode but not listening - ignore transcript
                 logger.debug(f"[STT] Ignored (manual mode, not listening): '{transcript}'")
         else:
-            # -------- Auto mode: detect question and answer --------
-            question = process_transcript(transcript)
-            if question and self.answer_engine:
-                logger.info(f"[STT] Question detected (auto mode): '{question}'")
-                threading.Thread(
-                    target=self.answer_engine.generate,
-                    args=(question,),
-                    daemon=True
-                ).start()
+            # -------- Auto mode: aggregate finals into an utterance --------
+            with self.auto_buffer_lock:
+                self.auto_buffer.append(transcript.strip())
+            if speech_final:
+                self._flush_auto_buffer()
             else:
-                logger.debug(f"[STT] Not a question (auto mode): '{transcript}'")
+                self._schedule_auto_flush()
 
     # -------- Notify UI of timeout status --------
     def notify_ui_timeout(self, remaining_secs):
@@ -168,6 +254,8 @@ class DeepgramSTT:
             try:
                 transcript = result.channel.alternatives[0].transcript
                 is_final = result.is_final
+                speech_final = getattr(result, "speech_final", False)
+                confidence = getattr(result.channel.alternatives[0], "confidence", None)
 
                 if transcript.strip():
                     if not is_final:
@@ -175,8 +263,11 @@ class DeepgramSTT:
                         print(f"\r🎤 {transcript}    ", end="", flush=True)
                     else:
                         print(f"\r✅ {transcript}        ")
-                        logger.info(f"[STT] Final: {transcript}")
-                        self.handle_transcript(transcript)
+                        logger.info(
+                            f"[STT] Final (speech_final={speech_final}, "
+                            f"confidence={confidence}): {transcript}"
+                        )
+                        self.handle_transcript(transcript, speech_final=speech_final)
 
             except Exception as e:
                 logger.error(f"[STT] Message error: {e}")

@@ -14,6 +14,22 @@ FILLER_WORDS = {
     "like", "you know", "i mean", "basically", "actually"
 }
 
+LEADING_FILLERS = ("okay", "ok", "so", "yeah", "yes", "right", "well")
+WEAK_CONFIRMATIONS = ("okay", "ok", "right", "correct", "yeah", "yes")
+ANNOUNCEMENT_PREFIXES = (
+    "i will ", "i'm going to ", "i am going to ", "i am pasting ",
+    "i'm pasting ", "give me a second", "let me ", "you can ",
+)
+
+
+def is_screen_capture_command(text: str) -> bool:
+    """Return True for an imperative request to capture the current screen."""
+    cleaned = re.sub(r"\s+", " ", text.strip().lower())
+    return bool(re.search(
+        r"\b(?:take|capture|grab)\b[^.?!]{0,30}\b(?:screenshot|screen)\b",
+        cleaned,
+    ))
+
 # -------- Question starters --------
 QUESTION_STARTERS = (
     "who", "what", "when", "where", "why", "how",
@@ -52,11 +68,25 @@ def is_noise(text: str) -> bool:
 def is_question(text: str) -> bool:
     """Returns True if transcript is a direct question."""
     cleaned = text.strip().lower()
-    if cleaned.endswith("?"):
+    question_text = re.sub(
+        r"^(?:(?:okay|ok|so|yeah|yes|right|well)[,.]?\s+)+",
+        "",
+        cleaned,
+    ).strip()
+    without_confirmation = re.sub(
+        r"(?:\s+(?:okay|ok|right|correct|yeah|yes))\s*\?+$",
+        "?",
+        cleaned,
+    ).strip()
+    if without_confirmation.endswith("?") and without_confirmation != "?":
+        if any(cleaned.endswith(f" {confirmation}?") for confirmation in WEAK_CONFIRMATIONS):
+            meaningful = without_confirmation[:-1].strip()
+            if not any(starter in meaningful for starter in QUESTION_STARTERS):
+                return False
         logger.debug(f"[QD] Detected (question mark): '{text}'")
         return True
     for starter in QUESTION_STARTERS:
-        if cleaned.startswith(starter):
+        if question_text.startswith(starter):
             logger.debug(f"[QD] Detected (starter '{starter}'): '{text}'")
             return True
     return False
@@ -65,10 +95,39 @@ def is_question(text: str) -> bool:
 def is_coding_task(text: str) -> bool:
     """Returns True if transcript sounds like a coding/task request."""
     cleaned = text.strip().lower()
+    explicit_task = (
+        "write code", "write a program", "write a function", "provide code",
+        "implement", "build", "create a", "design a", "solve", "debug",
+        "fix this", "optimize", "algorithm for", "how would you code",
+    )
+    if any(phrase in cleaned for phrase in explicit_task):
+        logger.debug(f"[QD] Detected coding task: '{text}'")
+        return True
     for keyword in CODING_KEYWORDS:
-        if keyword in cleaned:
+        if keyword in ("fibonacci", "factorial", "prime", "palindrome", "anagram",
+                       "linked list", "binary tree", "stack", "queue", "recursion",
+                       "big o", "time complexity", "space complexity") and keyword in cleaned:
             logger.debug(f"[QD] Detected coding task (keyword '{keyword}'): '{text}'")
             return True
+    return False
+
+
+def normalize_transcript(text: str) -> str:
+    """Normalize common spoken filler and a few stable STT terminology errors."""
+    normalized = re.sub(r"\s+", " ", text.strip())
+    normalized = re.sub(r"\b[Ss]\s+three\b", "S3", normalized)
+    normalized = re.sub(r"\b[Ll]{2,3}[Mm]\b", "LLM", normalized)
+    return normalized
+
+
+def is_announcement(text: str) -> bool:
+    """Reject setup or confirmation statements that are not requests for an answer."""
+    cleaned = text.strip().lower()
+    if any(cleaned.startswith(prefix) for prefix in ANNOUNCEMENT_PREFIXES):
+        return True
+    words = cleaned.rstrip("?").split()
+    if len(words) <= 5 and words and words[-1] in WEAK_CONFIRMATIONS:
+        return True
     return False
 
 
@@ -80,9 +139,13 @@ def process_transcript(text: str) -> str | None:
     if not text or not text.strip():
         return None
 
-    text = text.strip()
+    text = normalize_transcript(text)
 
     if is_noise(text):
+        return None
+
+    if is_announcement(text):
+        logger.debug(f"[QD] Ignored announcement: '{text}'")
         return None
 
     if is_question(text):
